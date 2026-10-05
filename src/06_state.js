@@ -194,7 +194,7 @@ const Game = {
     let v;
     switch (a.stat) {
       case 'accs': v = SAVE.acc.length; break;
-      case 'decor': v = SAVE.room.filter((r) => ROOM_BY_ID[r] && ROOM_BY_ID[r].price > 0).length; break;
+      case 'decor': v = SAVE.st.decorBought || 0; break;
       case 'petCount': v = SAVE.p.length; break;
       case 'dogs': v = SAVE.p.filter((p) => BREEDS[p.b].kind === 'dog').length; break;
       case 'best_run': v = SAVE.best.run; break;

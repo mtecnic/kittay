@@ -87,7 +87,9 @@ function resize() {
   const cw = window.innerWidth, ch = window.innerHeight;
   const dw = Math.floor(cw * dpr), dh = Math.floor(ch * dpr);
   // choose an integer pixel scale so the short side is at least ~240 game pixels
-  const s = Math.max(1, Math.floor(Math.min(dw, dh) / 240));
+  // (integer scale when possible for crisp pixels; fractional on small low-DPI screens)
+  let s = Math.min(dw, dh) / 240;
+  s = s >= 2 ? Math.floor(s) : Math.max(1, s);
   let w = Math.floor(dw / s), h = Math.floor(dh / s);
   // keep things sane on very wide / very tall screens
   if (w > h * 1.9) w = Math.floor(h * 1.9);
@@ -97,9 +99,9 @@ function resize() {
   buf.width = W; buf.height = H;
   g = buf.getContext('2d');
   g.imageSmoothingEnabled = false;
-  view.width = W * s; view.height = H * s;
-  view.style.width = (W * s) / dpr + 'px';
-  view.style.height = (H * s) / dpr + 'px';
+  view.width = Math.round(W * s); view.height = Math.round(H * s);
+  view.style.width = Math.round(W * s) / dpr + 'px';
+  view.style.height = Math.round(H * s) / dpr + 'px';
   vctx.imageSmoothingEnabled = false;
   layoutVersion++;
 }
@@ -203,7 +205,7 @@ function drawTransition() {
     }
   }
 }
-function pushOverlay(o) { overlays.push(o); UI.active = null; if (o.enter) o.enter(); return o; }
+function pushOverlay(o) { overlays.push(o); UI.active = null; UI.justOpened = true; if (o.enter) o.enter(); return o; }
 function popOverlay(o) {
   const i = o ? overlays.indexOf(o) : overlays.length - 1;
   if (i >= 0) overlays.splice(i, 1);

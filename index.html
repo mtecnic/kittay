@@ -148,7 +148,9 @@ function resize() {
   const cw = window.innerWidth, ch = window.innerHeight;
   const dw = Math.floor(cw * dpr), dh = Math.floor(ch * dpr);
   // choose an integer pixel scale so the short side is at least ~240 game pixels
-  const s = Math.max(1, Math.floor(Math.min(dw, dh) / 240));
+  // (integer scale when possible for crisp pixels; fractional on small low-DPI screens)
+  let s = Math.min(dw, dh) / 240;
+  s = s >= 2 ? Math.floor(s) : Math.max(1, s);
   let w = Math.floor(dw / s), h = Math.floor(dh / s);
   // keep things sane on very wide / very tall screens
   if (w > h * 1.9) w = Math.floor(h * 1.9);
@@ -158,9 +160,9 @@ function resize() {
   buf.width = W; buf.height = H;
   g = buf.getContext('2d');
   g.imageSmoothingEnabled = false;
-  view.width = W * s; view.height = H * s;
-  view.style.width = (W * s) / dpr + 'px';
-  view.style.height = (H * s) / dpr + 'px';
+  view.width = Math.round(W * s); view.height = Math.round(H * s);
+  view.style.width = Math.round(W * s) / dpr + 'px';
+  view.style.height = Math.round(H * s) / dpr + 'px';
   vctx.imageSmoothingEnabled = false;
   layoutVersion++;
 }
@@ -264,7 +266,7 @@ function drawTransition() {
     }
   }
 }
-function pushOverlay(o) { overlays.push(o); UI.active = null; if (o.enter) o.enter(); return o; }
+function pushOverlay(o) { overlays.push(o); UI.active = null; UI.justOpened = true; if (o.enter) o.enter(); return o; }
 function popOverlay(o) {
   const i = o ? overlays.indexOf(o) : overlays.length - 1;
   if (i >= 0) overlays.splice(i, 1);
@@ -549,13 +551,21 @@ const Snd = {
   unlock() {
     this.init();
     if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-    if (!this.unlocked) {
-      const b = this.ctx.createBuffer(1, 1, 22050), s = this.ctx.createBufferSource();
-      s.buffer = b; s.connect(this.ctx.destination); s.start(0);
-      this.unlocked = true;
-      Music.kick();
-    }
+    try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch (e) { /* older Safari */ }
+    if (this.ctx.state !== 'running') {
+      // must happen inside a touch handler on iPad: play a silent buffer + resume
+      try {
+        const b = this.ctx.createBuffer(1, 1, 22050), src = this.ctx.createBufferSource();
+        src.buffer = b; src.connect(this.ctx.destination); src.start(0);
+      } catch (e) { /* ignore */ }
+      const p = this.ctx.resume();
+      if (p && p.then) p.then(() => this.onRunning()).catch(() => {});
+    } else this.onRunning();
+  },
+  onRunning() {
+    if (this.unlocked) return;
+    this.unlocked = true;
+    Music.kick();
   },
   setSfx(on) { this.sfxOn = on; if (this.sfxGain) this.sfxGain.gain.value = on ? 0.55 : 0; },
   setMusic(on) { this.musicOn = on; if (this.musGain) this.musGain.gain.value = on ? 0.32 : 0; },
@@ -1085,7 +1095,9 @@ function hit(x, y, w, h) {
   return I.x >= x && I.x < x + w && I.y >= y && I.y < y + h;
 }
 // core click logic; returns {click, down, over}
+const UI_RECTS = {};
 function uiLogic(id, x, y, w, h, scrolly) {
+  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0];
   if (!UI.on) return { click: false, down: false, over: false };
   const over = hit(x, y, w, h);
   if (I.pressed && over) UI.active = id;
@@ -2617,7 +2629,7 @@ const Game = {
     let v;
     switch (a.stat) {
       case 'accs': v = SAVE.acc.length; break;
-      case 'decor': v = SAVE.room.filter((r) => ROOM_BY_ID[r] && ROOM_BY_ID[r].price > 0).length; break;
+      case 'decor': v = SAVE.st.decorBought || 0; break;
       case 'petCount': v = SAVE.p.length; break;
       case 'dogs': v = SAVE.p.filter((p) => BREEDS[p.b].kind === 'dog').length; break;
       case 'best_run': v = SAVE.best.run; break;
@@ -2910,7 +2922,7 @@ Scenes.menu = {
     drawDreamBG(dt);
     const sc = clamp(Math.floor(W / 64), 3, 6);
     drawLogo(W / 2, 14 + sc, sc, { peek: false });
-    const bw = Math.min(170, W - 60), bh = 26;
+    const bw = Math.min(170, W - 60), bh = PORTRAIT ? 32 : 26;
     const items = [
       ['▶  PLAY', 'pink', () => go('slots')],
       ['How to Play', 'sky', () => go('help')],
@@ -3229,8 +3241,8 @@ function homeLayout() {
   L.groundY = Math.round(lerp(L.floorY, L.barY, 0.66));
   L.sideS = 24; L.sideX = W - L.sideS - 4;
   L.minX = 34; L.maxX = W - L.sideS - 34;
-  L.bowlX = Math.round(W * (L.port ? 0.2 : 0.22)); L.bowlY = L.groundY + 6;
-  L.bedX = Math.round(W * 0.1) + 24; L.bedY = L.groundY + 10;
+  L.bowlX = Math.max(86, Math.round(W * 0.3)); L.bowlY = L.groundY + 6;
+  L.bedX = 31; L.bedY = L.groundY + 10;
   return L;
 }
 
@@ -3521,7 +3533,8 @@ function drawRoom(L, dt) {
     g.drawImage(spr, POX - 11, Math.round(POY - hh + 2), 22, 22, px + 3, py + 3, 22, 22);
   }
   if (has('clock')) {
-    const cx = Math.round(W * 0.3), cy = L.roomTop + 18;
+    const wr = winRect(L);
+    const cx = Math.round(wr.x + wr.w + 26), cy = L.roomTop + 18;
     disc(cx, cy, 10, COL.ink); disc(cx, cy, 9, '#ff9ac8'); disc(cx, cy, 7, '#ffffff');
     const d = new Date();
     const hA = ((d.getHours() % 12) + d.getMinutes() / 60) / 12 * TAU - Math.PI / 2, mA = d.getMinutes() / 60 * TAU - Math.PI / 2;
@@ -4091,7 +4104,7 @@ function showFoodTray(home) {
     g.save(); g.beginPath(); g.rect(vx, y + 14, vw, 70); g.clip(); UI.clip = { x: vx, y: y + 14, w: vw, h: 70 };
     foods.forEach((f, i) => {
       const bx = vx + i * (cw + gap) - ov.sx, by = y + 20;
-      const cnt = f.id === 'kibble' ? '∞' : 'x' + SAVE.inv[f.id];
+      const cnt = f.id === 'kibble' ? 'Free' : 'x' + SAVE.inv[f.id];
       const fave = BREEDS[Game.pet().b].fave === f.id;
       if (button('food' + f.id, bx, by, cw, 54, { color: fave ? 'sun' : 'paper', scroll: true })) { popOverlay(ov); home.feed(f); }
       iconC(f.icon, bx + cw / 2, by + 16, 2);
@@ -4358,7 +4371,7 @@ Object.assign(ICON_ART, {
 
 function careStage() {
   // geometry shared by brush & bath: big pet in the middle
-  const sc = Math.min(H, W) >= 300 ? 4 : 3;
+  const sc = (H >= 320 && W >= 240) || Math.min(H, W) >= 300 ? 4 : 3;
   const gy = PORTRAIT ? Math.round(H * 0.62) : H - 34;
   return { sc, x: Math.round(W / 2), gy };
 }
@@ -4512,6 +4525,7 @@ Scenes.bath = {
     this.t += dt;
     if (this.done || overlays.length) return;
     const S = careStage(), pet = Game.pet();
+    if (this.waitUp) { if (!I.down) this.waitUp = false; return; }
     const moving = I.down && UI.on && Math.hypot(I.dx, I.dy) > 0.5;
     if (this.step === 0) {
       if (moving && this.onPet(I.x, I.y)) {
@@ -4522,7 +4536,7 @@ Scenes.bath = {
           Snd.play('bubble');
         }
       }
-      if (this.bubbles.length >= this.maxBubbles) { this.step = 1; Snd.play('sparkle'); this.total = this.bubbles.length; }
+      if (this.bubbles.length >= this.maxBubbles) { this.step = 1; this.waitUp = true; Snd.play('sparkle'); this.total = this.bubbles.length; }
     } else if (this.step === 1) {
       if (I.down && UI.on) {
         this.sfxT -= dt;
@@ -4544,7 +4558,7 @@ Scenes.bath = {
         }
       }
       this.drops = this.drops.filter((d) => d.y < S.gy + 6);
-      if (this.bubbles.length === 0) { this.step = 2; Snd.play('sparkle'); this.drops = []; }
+      if (this.bubbles.length === 0) { this.step = 2; this.waitUp = true; Snd.play('sparkle'); this.drops = []; }
     } else if (this.step === 2) {
       if (moving && this.onPet(I.x, I.y)) {
         this.wet -= Math.hypot(I.dx, I.dy) / 600;
@@ -4766,8 +4780,13 @@ Scenes.train = {
       const bx = 10 + cI * (bw + 6), by = btnTop + r * (btnH + 6);
       const lit = this.lit === i;
       const isIcon = c.icon.length > 1;
-      if (button('cmd' + i, bx, by, bw, btnH, { label: c.name, icon: isIcon ? c.icon : null, color: c.color, stack: isIcon, disabled: this.phase !== 'input' && !lit, bg: lit ? '#ffffff' : null, sfx: 'none', scale: isIcon ? 1 : 1 })) this.press(i);
-      if (!isIcon) text(c.icon, bx + bw / 2, by + 6, { align: 'center', color: lit ? BTN[c.color].d : '#ffffff', scale: 2, shadow: lit ? null : BTN[c.color].d });
+      const dis = this.phase !== 'input' && !lit;
+      if (button('cmd' + i, bx, by, bw, btnH, { color: c.color, disabled: dis, bg: lit ? '#ffffff' : null, sfx: 'none' })) this.press(i);
+      const pressed = UI.active === 'cmd' + i && I.down ? 2 : 0;
+      const tc = lit ? BTN[c.color].d : '#ffffff', sh = lit ? null : BTN[dis ? 'gray' : c.color].d;
+      if (isIcon) iconC(c.icon, bx + bw / 2, by + btnH / 2 - 7 + pressed, 2);
+      else text(c.icon, bx + bw / 2, by + btnH / 2 - 17 + pressed, { align: 'center', color: tc, scale: 2, shadow: sh });
+      text(c.name, bx + bw / 2, by + btnH / 2 + 4 + pressed, { align: 'center', color: tc, shadow: sh });
     });
     // end panels
     if (this.phase === 'win' || this.phase === 'fail') {
@@ -5328,7 +5347,7 @@ Scenes.store = {
           const eq = Object.assign({}, pet.eq, { [it.slot]: it.id });
           drawPet({ b: pet.b, lv: pet.lv, eq }, x + 40, y + 76, 2, { expr: 'happy' });
         } else itemIcon(tab, it, x + 40, y + 46, 3);
-        let ty = y + 16;
+        let ty = y + 28;
         const tx = x + 80, tw = w - 90;
         const desc = it.desc || (tab === 1 ? { h: 'A cute hat for your pet.', n: 'Something nice to wear around the neck.', f: 'Super stylish eyewear!' }[it.slot] : it.type === 'wall' ? 'New wallpaper for your room.' : 'A new floor for your room.');
         wrapText(desc, tw).forEach((l) => { text(l, tx, ty, { color: COL.ink }); ty += 10; });
@@ -5372,6 +5391,7 @@ Scenes.store = {
     else if (this.tab === 1) { SAVE.acc.push(it.id); Game.pet().eq[it.slot] = it.id; }
     else {
       SAVE.room.push(it.id);
+      SAVE.st.decorBought = (SAVE.st.decorBought || 0) + 1;
       if (it.type === 'wall') SAVE.wall = it.id;
       if (it.type === 'floor') SAVE.floor = it.id;
     }
@@ -5540,7 +5560,8 @@ Scenes.pets = {
       }
       const p = SAVE.p[pi];
       const active = pi === SAVE.ap;
-      if (button('pc' + pi, x, y, cwF, ch, { color: active ? 'pink' : 'paper', scroll: true })) {
+      const onRename = active && I.x >= x + cwF - 24 && I.y < y + 22 && I.y >= y;
+      if (button('pc' + pi, x, y, cwF, ch, { color: active ? 'pink' : 'paper', scroll: true }) && !onRename) {
         if (!active) {
           SAVE.ap = pi; RT.sleeping = false;
           Game.voice(p);
@@ -5718,6 +5739,7 @@ function frame(ts) {
     for (const o of overlays.slice()) if (o.update) o.update(dt);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = 1;
+    UI.justOpened = false;
     UI.on = overlays.length === 0 && Trans.dir === 0;
     UI.clip = null;
     if (scene) scene.draw(dt);
@@ -5725,7 +5747,7 @@ function frame(ts) {
     Particles.draw(1);
     const ovs = overlays.slice();
     for (let i = 0; i < ovs.length; i++) {
-      UI.on = i === ovs.length - 1 && Trans.dir === 0 && overlays.includes(ovs[i]);
+      UI.on = i === ovs.length - 1 && Trans.dir === 0 && overlays.includes(ovs[i]) && !UI.justOpened;
       ovs[i].draw(dt);
     }
     UI.on = true;
@@ -5813,6 +5835,10 @@ Scenes.devhome = {
   draw() {},
 };
 
+function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+window.addEventListener('pagehide', saveNow);
+
 function boot() {
   loadCfg();
   const t = QS.get('test');
@@ -5820,7 +5846,7 @@ function boot() {
   else go('boot', null, true);
   requestAnimationFrame(frame);
 }
-if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
+if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
 boot();
 
 })();

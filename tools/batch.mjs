@@ -34,7 +34,13 @@ for (const e of plan) {
   }, [lx, ly]);
   for (const s of e.steps || []) {
     if (s.wait) await page.waitForTimeout(s.wait);
+    if (s.tapId) {
+      const r = await page.evaluate((id) => window.KT.R[id] || null, s.tapId);
+      if (!r) logs.push('NO BUTTON ' + s.tapId); else { const [x, y] = await toPage(r[0], r[1]); await page.mouse.click(x, y); }
+      await page.waitForTimeout(s.after || 250);
+    }
     if (s.tap) { const [x, y] = await toPage(...s.tap); await page.mouse.click(x, y); await page.waitForTimeout(s.after || 150); }
+    if (s.dragEval) s.drag = await page.evaluate(s.dragEval);
     if (s.drag) {
       const pts = [];
       for (const p of s.drag) pts.push(await toPage(...p));

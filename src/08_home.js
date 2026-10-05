@@ -17,8 +17,8 @@ function homeLayout() {
   L.groundY = Math.round(lerp(L.floorY, L.barY, 0.66));
   L.sideS = 24; L.sideX = W - L.sideS - 4;
   L.minX = 34; L.maxX = W - L.sideS - 34;
-  L.bowlX = Math.round(W * (L.port ? 0.2 : 0.22)); L.bowlY = L.groundY + 6;
-  L.bedX = Math.round(W * 0.1) + 24; L.bedY = L.groundY + 10;
+  L.bowlX = Math.max(86, Math.round(W * 0.3)); L.bowlY = L.groundY + 6;
+  L.bedX = 31; L.bedY = L.groundY + 10;
   return L;
 }
 
@@ -309,7 +309,8 @@ function drawRoom(L, dt) {
     g.drawImage(spr, POX - 11, Math.round(POY - hh + 2), 22, 22, px + 3, py + 3, 22, 22);
   }
   if (has('clock')) {
-    const cx = Math.round(W * 0.3), cy = L.roomTop + 18;
+    const wr = winRect(L);
+    const cx = Math.round(wr.x + wr.w + 26), cy = L.roomTop + 18;
     disc(cx, cy, 10, COL.ink); disc(cx, cy, 9, '#ff9ac8'); disc(cx, cy, 7, '#ffffff');
     const d = new Date();
     const hA = ((d.getHours() % 12) + d.getMinutes() / 60) / 12 * TAU - Math.PI / 2, mA = d.getMinutes() / 60 * TAU - Math.PI / 2;
@@ -879,7 +880,7 @@ function showFoodTray(home) {
     g.save(); g.beginPath(); g.rect(vx, y + 14, vw, 70); g.clip(); UI.clip = { x: vx, y: y + 14, w: vw, h: 70 };
     foods.forEach((f, i) => {
       const bx = vx + i * (cw + gap) - ov.sx, by = y + 20;
-      const cnt = f.id === 'kibble' ? '∞' : 'x' + SAVE.inv[f.id];
+      const cnt = f.id === 'kibble' ? 'Free' : 'x' + SAVE.inv[f.id];
       const fave = BREEDS[Game.pet().b].fave === f.id;
       if (button('food' + f.id, bx, by, cw, 54, { color: fave ? 'sun' : 'paper', scroll: true })) { popOverlay(ov); home.feed(f); }
       iconC(f.icon, bx + cw / 2, by + 16, 2);

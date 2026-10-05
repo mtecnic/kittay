@@ -10,7 +10,7 @@ Object.assign(ICON_ART, {
 
 function careStage() {
   // geometry shared by brush & bath: big pet in the middle
-  const sc = Math.min(H, W) >= 300 ? 4 : 3;
+  const sc = (H >= 320 && W >= 240) || Math.min(H, W) >= 300 ? 4 : 3;
   const gy = PORTRAIT ? Math.round(H * 0.62) : H - 34;
   return { sc, x: Math.round(W / 2), gy };
 }
@@ -164,6 +164,7 @@ Scenes.bath = {
     this.t += dt;
     if (this.done || overlays.length) return;
     const S = careStage(), pet = Game.pet();
+    if (this.waitUp) { if (!I.down) this.waitUp = false; return; }
     const moving = I.down && UI.on && Math.hypot(I.dx, I.dy) > 0.5;
     if (this.step === 0) {
       if (moving && this.onPet(I.x, I.y)) {
@@ -174,7 +175,7 @@ Scenes.bath = {
           Snd.play('bubble');
         }
       }
-      if (this.bubbles.length >= this.maxBubbles) { this.step = 1; Snd.play('sparkle'); this.total = this.bubbles.length; }
+      if (this.bubbles.length >= this.maxBubbles) { this.step = 1; this.waitUp = true; Snd.play('sparkle'); this.total = this.bubbles.length; }
     } else if (this.step === 1) {
       if (I.down && UI.on) {
         this.sfxT -= dt;
@@ -196,7 +197,7 @@ Scenes.bath = {
         }
       }
       this.drops = this.drops.filter((d) => d.y < S.gy + 6);
-      if (this.bubbles.length === 0) { this.step = 2; Snd.play('sparkle'); this.drops = []; }
+      if (this.bubbles.length === 0) { this.step = 2; this.waitUp = true; Snd.play('sparkle'); this.drops = []; }
     } else if (this.step === 2) {
       if (moving && this.onPet(I.x, I.y)) {
         this.wet -= Math.hypot(I.dx, I.dy) / 600;
@@ -418,8 +419,13 @@ Scenes.train = {
       const bx = 10 + cI * (bw + 6), by = btnTop + r * (btnH + 6);
       const lit = this.lit === i;
       const isIcon = c.icon.length > 1;
-      if (button('cmd' + i, bx, by, bw, btnH, { label: c.name, icon: isIcon ? c.icon : null, color: c.color, stack: isIcon, disabled: this.phase !== 'input' && !lit, bg: lit ? '#ffffff' : null, sfx: 'none', scale: isIcon ? 1 : 1 })) this.press(i);
-      if (!isIcon) text(c.icon, bx + bw / 2, by + 6, { align: 'center', color: lit ? BTN[c.color].d : '#ffffff', scale: 2, shadow: lit ? null : BTN[c.color].d });
+      const dis = this.phase !== 'input' && !lit;
+      if (button('cmd' + i, bx, by, bw, btnH, { color: c.color, disabled: dis, bg: lit ? '#ffffff' : null, sfx: 'none' })) this.press(i);
+      const pressed = UI.active === 'cmd' + i && I.down ? 2 : 0;
+      const tc = lit ? BTN[c.color].d : '#ffffff', sh = lit ? null : BTN[dis ? 'gray' : c.color].d;
+      if (isIcon) iconC(c.icon, bx + bw / 2, by + btnH / 2 - 7 + pressed, 2);
+      else text(c.icon, bx + bw / 2, by + btnH / 2 - 17 + pressed, { align: 'center', color: tc, scale: 2, shadow: sh });
+      text(c.name, bx + bw / 2, by + btnH / 2 + 4 + pressed, { align: 'center', color: tc, shadow: sh });
     });
     // end panels
     if (this.phase === 'win' || this.phase === 'fail') {

@@ -22,6 +22,7 @@ function frame(ts) {
     for (const o of overlays.slice()) if (o.update) o.update(dt);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = 1;
+    UI.justOpened = false;
     UI.on = overlays.length === 0 && Trans.dir === 0;
     UI.clip = null;
     if (scene) scene.draw(dt);
@@ -29,7 +30,7 @@ function frame(ts) {
     Particles.draw(1);
     const ovs = overlays.slice();
     for (let i = 0; i < ovs.length; i++) {
-      UI.on = i === ovs.length - 1 && Trans.dir === 0 && overlays.includes(ovs[i]);
+      UI.on = i === ovs.length - 1 && Trans.dir === 0 && overlays.includes(ovs[i]) && !UI.justOpened;
       ovs[i].draw(dt);
     }
     UI.on = true;
@@ -117,6 +118,10 @@ Scenes.devhome = {
   draw() {},
 };
 
+function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+window.addEventListener('pagehide', saveNow);
+
 function boot() {
   loadCfg();
   const t = QS.get('test');
@@ -124,5 +129,5 @@ function boot() {
   else go('boot', null, true);
   requestAnimationFrame(frame);
 }
-if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
+if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
 boot();

@@ -243,7 +243,7 @@ Scenes.menu = {
     drawDreamBG(dt);
     const sc = clamp(Math.floor(W / 64), 3, 6);
     drawLogo(W / 2, 14 + sc, sc, { peek: false });
-    const bw = Math.min(170, W - 60), bh = 26;
+    const bw = Math.min(170, W - 60), bh = PORTRAIT ? 32 : 26;
     const items = [
       ['▶  PLAY', 'pink', () => go('slots')],
       ['How to Play', 'sky', () => go('help')],

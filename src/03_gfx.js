@@ -235,7 +235,9 @@ function hit(x, y, w, h) {
   return I.x >= x && I.x < x + w && I.y >= y && I.y < y + h;
 }
 // core click logic; returns {click, down, over}
+const UI_RECTS = {};
 function uiLogic(id, x, y, w, h, scrolly) {
+  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0];
   if (!UI.on) return { click: false, down: false, over: false };
   const over = hit(x, y, w, h);
   if (I.pressed && over) UI.active = id;

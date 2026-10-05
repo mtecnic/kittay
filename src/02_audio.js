@@ -26,13 +26,21 @@ const Snd = {
   unlock() {
     this.init();
     if (!this.ctx) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-    if (!this.unlocked) {
-      const b = this.ctx.createBuffer(1, 1, 22050), s = this.ctx.createBufferSource();
-      s.buffer = b; s.connect(this.ctx.destination); s.start(0);
-      this.unlocked = true;
-      Music.kick();
-    }
+    try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch (e) { /* older Safari */ }
+    if (this.ctx.state !== 'running') {
+      // must happen inside a touch handler on iPad: play a silent buffer + resume
+      try {
+        const b = this.ctx.createBuffer(1, 1, 22050), src = this.ctx.createBufferSource();
+        src.buffer = b; src.connect(this.ctx.destination); src.start(0);
+      } catch (e) { /* ignore */ }
+      const p = this.ctx.resume();
+      if (p && p.then) p.then(() => this.onRunning()).catch(() => {});
+    } else this.onRunning();
+  },
+  onRunning() {
+    if (this.unlocked) return;
+    this.unlocked = true;
+    Music.kick();
   },
   setSfx(on) { this.sfxOn = on; if (this.sfxGain) this.sfxGain.gain.value = on ? 0.55 : 0; },
   setMusic(on) { this.musicOn = on; if (this.musGain) this.musGain.gain.value = on ? 0.32 : 0; },

@@ -135,7 +135,7 @@ Scenes.store = {
           const eq = Object.assign({}, pet.eq, { [it.slot]: it.id });
           drawPet({ b: pet.b, lv: pet.lv, eq }, x + 40, y + 76, 2, { expr: 'happy' });
         } else itemIcon(tab, it, x + 40, y + 46, 3);
-        let ty = y + 16;
+        let ty = y + 28;
         const tx = x + 80, tw = w - 90;
         const desc = it.desc || (tab === 1 ? { h: 'A cute hat for your pet.', n: 'Something nice to wear around the neck.', f: 'Super stylish eyewear!' }[it.slot] : it.type === 'wall' ? 'New wallpaper for your room.' : 'A new floor for your room.');
         wrapText(desc, tw).forEach((l) => { text(l, tx, ty, { color: COL.ink }); ty += 10; });
@@ -179,6 +179,7 @@ Scenes.store = {
     else if (this.tab === 1) { SAVE.acc.push(it.id); Game.pet().eq[it.slot] = it.id; }
     else {
       SAVE.room.push(it.id);
+      SAVE.st.decorBought = (SAVE.st.decorBought || 0) + 1;
       if (it.type === 'wall') SAVE.wall = it.id;
       if (it.type === 'floor') SAVE.floor = it.id;
     }
@@ -347,7 +348,8 @@ Scenes.pets = {
       }
       const p = SAVE.p[pi];
       const active = pi === SAVE.ap;
-      if (button('pc' + pi, x, y, cwF, ch, { color: active ? 'pink' : 'paper', scroll: true })) {
+      const onRename = active && I.x >= x + cwF - 24 && I.y < y + 22 && I.y >= y;
+      if (button('pc' + pi, x, y, cwF, ch, { color: active ? 'pink' : 'paper', scroll: true }) && !onRename) {
         if (!active) {
           SAVE.ap = pi; RT.sleeping = false;
           Game.voice(p);

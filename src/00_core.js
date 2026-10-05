@@ -140,9 +140,15 @@ view.addEventListener('pointermove', (e) => {
 function pointerEnd(e) {
   if (e.pointerId !== I.pid) return;
   toLogical(e);
-  I.down = false; I.released = true; I.pid = null;
-  I.tap = I.moved < 8 && now() - I.st < 0.7;
   Snd.unlock();
+  // a very quick tap can press+release within one frame; deliver the release
+  // next frame so the top-most button (drawn last) owns the press
+  if (I.pressed) { I.pendingUp = true; return; }
+  releasePointer();
+}
+function releasePointer() {
+  I.down = false; I.released = true; I.pid = null; I.pendingUp = false;
+  I.tap = I.moved < 8 && now() - I.st < 0.7;
 }
 view.addEventListener('pointerup', pointerEnd);
 view.addEventListener('pointercancel', (e) => { if (e.pointerId === I.pid) { I.down = false; I.released = true; I.tap = false; I.pid = null; I.moved = 999; } });
@@ -156,10 +162,12 @@ window.addEventListener('keyup', (e) => { I.keys[e.key] = false; });
 function endInputFrame() {
   I.pressed = false; I.released = false; I.tap = false; I.keyPressed = null;
   I.dx = I.x - I.px; I.dy = I.y - I.py; I.px = I.x; I.py = I.y;
+  if (I.pendingUp) releasePointer();
 }
 
 /* ---------- time ---------- */
 let T = 0; // seconds since start (game clock)
+let FRAME = 0;
 const now = () => T;
 
 /* ---------- scenes ---------- */
@@ -236,7 +244,8 @@ const SaveIO = {
     document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=' + this.path;
   },
   enc(obj) {
-    return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+    const json = JSON.stringify(obj, (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v));
+    return btoa(unescape(encodeURIComponent(json)));
   },
   dec(str) {
     try { return JSON.parse(decodeURIComponent(escape(atob(str)))); } catch (e) { return null; }

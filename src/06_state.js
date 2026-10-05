@@ -39,8 +39,24 @@ function fixSave(s) {
   if (s.ap >= s.p.length) s.ap = 0;
   return s;
 }
+// compact form for cookies: item ids -> indexes (lists are append-only, so indexes stay stable)
+function packSave(s) {
+  const idx = (ids, list) => ids.map((id) => list.findIndex((x) => x.id === id)).filter((i) => i >= 0).join('.');
+  const o = Object.assign({}, s);
+  o.acc = idx(s.acc, ACCS); o.room = idx(s.room, ROOM); o.hide = idx(s.hide, ROOM);
+  o.p = s.p.map((p) => { const q = Object.assign({}, p, { s: p.s.map((v) => Math.round(v * 10) / 10) }); delete q.born; return q; });
+  o.pk = 1;
+  return o;
+}
+function unpackSave(o) {
+  if (!o || !o.pk) return o;
+  const ids = (str, list) => (str === '' || str == null ? [] : String(str).split('.').map((i) => list[+i] && list[+i].id).filter(Boolean));
+  o.acc = ids(o.acc, ACCS); o.room = ids(o.room, ROOM); o.hide = ids(o.hide, ROOM);
+  delete o.pk;
+  return o;
+}
 function slotSummary(i) {
-  const s = SaveIO.read(SLOT_KEYS[i]);
+  const s = unpackSave(SaveIO.read(SLOT_KEYS[i]));
   if (!s || !s.p) return null;
   return fixSave(s);
 }
@@ -53,7 +69,7 @@ const Game = {
     return RT.pets[i];
   },
   start(slot, save) {
-    SLOT = slot; SAVE = fixSave(save);
+    SLOT = slot; SAVE = fixSave(unpackSave(save));
     RT.pets = []; RT.events = []; RT.notified = new Set(); RT.sleeping = false; RT.giftChecked = false;
     this.applyOffline();
     this.refreshDaily();
@@ -62,7 +78,7 @@ const Game = {
   save() {
     if (!SAVE || SLOT < 0) return;
     SAVE.t = Date.now();
-    SaveIO.write(SLOT_KEYS[SLOT], SAVE);
+    SaveIO.write(SLOT_KEYS[SLOT], packSave(SAVE));
     RT.lastSave = T;
   },
   applyOffline() {
@@ -143,7 +159,7 @@ const Game = {
     p.xp += n;
     while (p.xp >= petXpNeed(p.lv) && p.lv < 99) {
       p.xp -= petXpNeed(p.lv); p.lv++;
-      RT.events.push({ type: 'level', pet: p });
+      RT.events.push({ type: 'level', pet: p, lv: p.lv });
     }
     const ns = stageOf(p);
     if (ns !== oldStage) RT.events.push({ type: 'grow', pet: p, from: oldStage, to: ns });

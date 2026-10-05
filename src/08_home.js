@@ -397,13 +397,18 @@ Scenes.home = {
     this.food = null; this.loveMeter = 0; this.petMode = false; this.welcome = a.welcome ? { t: 0, opened: false, box: true } : null;
     this.purrT = 0; this.messHint = 0;
     const rt = Game.rt();
-    rt.x = W / 2; rt.state = 'idle'; rt.t = 0; rt.dur = 2; rt.jump = 0; rt.jumpV = 0; rt.trick = null; rt.say = '';
+    rt.x = W / 2; rt.state = 'idle'; rt.t = 0; rt.dur = 2; rt.jump = 0; rt.jumpV = 0; rt.trick = null; rt.say = ''; rt.onArrive = null;
     if (RT.sleeping) { rt.state = 'sleep'; rt.x = this.L.bedX; }
     Music.play(RT.sleeping ? 'night' : 'home');
     if (!a.welcome && RT.awayMins > 90) { Toasts.add(Game.pet().n + ' missed you!', 'heart', 'pink'); RT.awayMins = 0; }
     this.toldTired = false;
   },
-  leave() { Game.save(); },
+  leave() {
+    // food that was put in the bowl but not eaten goes back in the cupboard
+    if (this.food && this.food.id !== 'kibble' && SAVE) SAVE.inv[this.food.id] = (SAVE.inv[this.food.id] || 0) + 1;
+    this.food = null;
+    Game.save();
+  },
   pet() { return Game.pet(); },
   update(dt) {
     this.t += dt;
@@ -432,6 +437,7 @@ Scenes.home = {
       Music.play('night');
     } else {
       if (pet.s[2] - (this.napStart || 0) >= 15) { Game.track('nap'); Game.addXP(5); }
+      rt.onArrive = null;
       rt.state = 'react'; rt.t = 0; rt.jumpV = -90; rt.expr = 'happy';
       Music.play('home');
     }
@@ -461,7 +467,7 @@ Scenes.home = {
     const canTouch = UI.on && !this.welcome && overlays.length === 0;
     if (canTouch && I.down && over && I.moved > 10 && rt.state !== 'sleep' && rt.state !== 'eat') {
       // petting
-      if (rt.state !== 'petted') { rt.state = 'petted'; rt.t = 0; }
+      if (rt.state !== 'petted') { rt.state = 'petted'; rt.t = 0; rt.onArrive = null; }
       rt.petT = 0.4;
       const d = Math.hypot(I.dx, I.dy);
       this.loveMeter += d;
@@ -474,7 +480,7 @@ Scenes.home = {
     if (canTouch && I.released && I.tap && over && rt.state !== 'eat') {
       if (rt.state === 'sleep') { rt.say = 'Zzz...'; rt.sayT = 1.2; }
       else {
-        rt.state = 'react'; rt.t = 0; rt.jumpV = -110; rt.expr = pick(['happy', 'love', 'wow']);
+        rt.state = 'react'; rt.t = 0; rt.jumpV = -110; rt.expr = pick(['happy', 'love', 'wow']); rt.onArrive = null;
         Game.voice(pet);
         burst('heart', rt.x, box.y + 10, 3, { speed: 40, props: { vy: -40, layer: 1 }, life: 0.9 });
         if (!this.boopT || T - this.boopT > 3) { Game.boost(1, 2); this.boopT = T; }
@@ -576,6 +582,11 @@ Scenes.home = {
   chooseIdle(pet, rt, L) {
     const r = Math.random();
     rt.t = 0;
+    if (this.food) { // food still waiting in the bowl
+      rt.state = 'walk'; rt.tx = L.bowlX + 26;
+      rt.onArrive = () => { rt.state = 'eat'; rt.t = 0; rt.face = -1; Snd.play('eat'); };
+      return;
+    }
     const tired = pet.s[2] < 30;
     if (r < 0.1 && Game.hasFurn('tree') && !Game.isDog(pet) && !tired) {
       rt.state = 'walk'; rt.tx = clamp(W - L.sideS - 42, L.minX, L.maxX);
@@ -638,7 +649,7 @@ Scenes.home = {
   doTrick(tr) {
     const rt = Game.rt();
     if (RT.sleeping) this.setSleep(false);
-    rt.state = 'trick'; rt.trick = tr.id; rt.t = 0;
+    rt.state = 'trick'; rt.trick = tr.id; rt.t = 0; rt.onArrive = null; rt.jump = 0; rt.jumpV = 0;
     Game.track('trick'); Game.boost(1, 3);
     Snd.play(tr.id === 'jump' || tr.id === 'roll' ? 'jump' : 'sparkle');
     if (tr.id === 'dance') Snd.play('fanfare');
@@ -961,7 +972,8 @@ function showEvent(ev) {
   if (ev.type === 'grow') { showGrow(ev); return; }
   const pet = ev.pet;
   if (ev.type === 'level') {
-    const reward = 10 + pet.lv * 3;
+    const lvNow = ev.lv || pet.lv;
+    const reward = 10 + lvNow * 3;
     Snd.play('levelup');
     confetti(60);
     const ov = pushOverlay({
@@ -977,7 +989,7 @@ function showEvent(ev) {
           line(W / 2, y + 58, W / 2 + Math.cos(a) * 40, y + 58 + Math.sin(a) * 40, i % 2 ? '#ffe8a0' : '#fff4d0', 2);
         }
         drawPet(pet, W / 2, y + 86, 2, { expr: 'star', tail: Math.round(Math.sin(T * 8) * 2), pawR: Math.abs(Math.sin(T * 4)) });
-        text(pet.n + ' is now Level ' + pet.lv + '!', W / 2, y + 94, { align: 'center', color: COL.ink });
+        text(pet.n + ' is now Level ' + lvNow + '!', W / 2, y + 94, { align: 'center', color: COL.ink });
         coinLabel(W / 2, y + 108, '+' + reward, 'center');
         if (button('lvok', W / 2 - 40, y + h - 30, 80, 22, { label: 'Yay!', color: 'pink' })) { popOverlay(ov); Game.addCoins(reward, W / 2, y + 110); Game.save(); }
       },
@@ -1050,13 +1062,12 @@ function showGrow(ev) {
 }
 
 function showDailyGift() {
-  const y = new Date(Date.now() - 864e5);
-  SAVE.streak = SAVE.gift === dayKey(y) ? SAVE.streak + 1 : 1;
-  SAVE.gift = dayKey();
-  const coins = 15 + 10 * Math.min(SAVE.streak, 7);
+  const now = new Date();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const streak = SAVE.gift === dayKey(yesterday) ? SAVE.streak + 1 : 1;
+  const coins = 15 + 10 * Math.min(streak, 7);
   const foodPool = FOODS.filter((f) => f.price > 0 && f.lv <= SAVE.ol + 1);
   const food = pick(foodPool);
-  Game.checkAdventures();
   const ov = pushOverlay({
     t: 0, opened: false, ot: 0,
     update(dt) { this.t += dt; if (this.opened) this.ot += dt; },
@@ -1064,7 +1075,7 @@ function showDailyGift() {
       g.fillStyle = 'rgba(18,10,30,0.65)'; g.fillRect(0, 0, W, H);
       const w = Math.min(W - 30, 220), h = 150, x = W / 2 - w / 2, yy = H / 2 - h / 2;
       panel(x, yy, w, h, { title: 'Daily Gift!', color: 'pink' });
-      text('Day ' + SAVE.streak + ' in a row!', W / 2, yy + 14, { align: 'center', color: COL.purpleD });
+      text('Day ' + streak + ' in a row!', W / 2, yy + 14, { align: 'center', color: COL.purpleD });
       if (!this.opened) {
         const wig = Math.sin(this.t * 14) * (Math.sin(this.t * 3) > 0 ? 2 : 0);
         iconC('gift', W / 2 + wig, yy + 64, 4);
@@ -1072,6 +1083,7 @@ function showDailyGift() {
         if (button('giftbtn', W / 2 - 50, yy + h - 32, 100, 24, { label: 'Open!', color: 'pink', glow: true }) ||
           (UI.on && I.released && I.tap && Math.abs(I.x - W / 2) < 40 && Math.abs(I.y - yy - 64) < 30)) {
           this.opened = true; Snd.play('gift'); confetti(50);
+          SAVE.streak = streak; SAVE.gift = dayKey(); Game.checkAdventures();
           burst('star', W / 2, yy + 64, 14, { speed: 90, props: { layer: 1 } });
           Game.addCoins(coins, W / 2, yy + 64);
           SAVE.inv[food.id] = (SAVE.inv[food.id] || 0) + 1;

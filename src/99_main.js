@@ -12,7 +12,7 @@ function frame(ts) {
   lastTs = ts;
   if (!(dt > 0)) dt = 1 / 60;
   dt = Math.min(dt, 0.05);
-  DT = dt; T += dt;
+  DT = dt; T += dt; FRAME++;
   try {
     updateTransition(dt);
     if (SAVE && scene && scene.sim) Game.tick(dt);
@@ -22,7 +22,6 @@ function frame(ts) {
     for (const o of overlays.slice()) if (o.update) o.update(dt);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = 1;
-    UI.justOpened = false;
     UI.on = overlays.length === 0 && Trans.dir === 0;
     UI.clip = null;
     if (scene) scene.draw(dt);
@@ -43,6 +42,7 @@ function frame(ts) {
   }
   if (QS.has('debug') && lastErr) text(lastErr.slice(0, 80), 2, H - 9, { color: '#ff0', shadow: '#000' });
   if (I.released) UI.active = null;
+  UI.justOpened = false;
   endInputFrame();
   vctx.imageSmoothingEnabled = false;
   vctx.drawImage(buf, 0, 0, view.width, view.height);
@@ -172,7 +172,16 @@ Scenes.icon = {
 };
 
 function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { saveNow(); return; }
+  // back from the background (iPad keeps tabs alive for days): catch up on time away
+  if (SAVE && SLOT >= 0) {
+    Game.applyOffline();
+    Game.refreshDaily();
+    RT.giftChecked = false;
+    Game.save();
+  }
+});
 window.addEventListener('pagehide', saveNow);
 
 function boot() {
@@ -182,5 +191,5 @@ function boot() {
   else go('boot', null, true);
   requestAnimationFrame(frame);
 }
-if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
+if (QS.has('test') || QS.has('debug')) window.KT = { packSave, unpackSave, SaveIO, slotSummary, get FRAME() { return FRAME; }, get errs() { return errCount; }, get lastErr() { return lastErr; }, get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
 boot();

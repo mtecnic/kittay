@@ -655,7 +655,7 @@ function petSprite(pet, st) {
   let c = _petCache.get(key);
   if (c) return c;
   c = renderPet(BREEDS[pet.b], stage, st, st.noAcc ? null : pet.eq);
-  if (_petCache.size > 600) _petCache.clear();
+  if (_petCache.size > 360) _petCache.clear();
   _petCache.set(key, c);
   return c;
 }

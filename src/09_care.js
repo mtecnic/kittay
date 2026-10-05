@@ -37,11 +37,14 @@ function careDone(title, lines, onOk) {
 }
 
 /* ---------- Brush ---------- */
+function careDoneTick(sc, dt) {
+  if (sc.doneT > 0) { sc.doneT -= dt; if (sc.doneT <= 0) careDone(sc.doneMsg[0], sc.doneMsg[1], () => go('home')); }
+}
 Scenes.brush = {
   sim: true,
   enter() {
     const pet = Game.pet();
-    this.t = 0; this.done = false; this.swT = 0; this.startCoat = pet.s[4];
+    this.t = 0; this.done = false; this.doneT = 0; this.swT = 0; this.startCoat = pet.s[4];
     const n = clamp(Math.round((100 - pet.s[4]) / 12) + 3, 3, 9);
     const pts = spritePixels(pet, { expr: 'open', noAcc: true }).filter(([x, y]) => y < POY - 3);
     this.tangles = [];
@@ -58,6 +61,7 @@ Scenes.brush = {
   scr(t) { const S = careStage(); return [S.x + (t.px - POX) * S.sc, S.gy + (t.py - POY) * S.sc]; },
   update(dt) {
     this.t += dt;
+    careDoneTick(this, dt);
     if (this.done || overlays.length) return;
     const pet = Game.pet();
     if (I.down && UI.on) {
@@ -93,7 +97,7 @@ Scenes.brush = {
       Game.addXP(xp);
       Game.addCoins(4, S.x, S.gy - 60);
       Game.track('brush'); Game.stat('brushes');
-      setTimeout(() => careDone('So fluffy!', [pet.n + ' looks amazing!', 'Fluff 100%   +' + xp + ' XP'], () => go('home')), 900);
+      this.doneMsg = ['So fluffy!', [pet.n + ' looks amazing!', 'Fluff 100%   +' + xp + ' XP']]; this.doneT = 0.9;
     }
   },
   draw(dt) {
@@ -148,7 +152,7 @@ Scenes.brush = {
 Scenes.bath = {
   sim: true,
   enter() {
-    this.t = 0; this.step = 0; this.bubbles = []; this.drops = []; this.wet = 1; this.acc = 0; this.done = false; this.sfxT = 0;
+    this.t = 0; this.step = 0; this.bubbles = []; this.drops = []; this.wet = 1; this.acc = 0; this.done = false; this.sfxT = 0; this.doneT = 0; this.waitUp = false;
     this.pts = spritePixels(Game.pet(), { expr: 'open', noAcc: true }).filter(([x, y]) => y < POY - 2);
     this.maxBubbles = 30;
     this.startClean = Game.pet().s[3];
@@ -162,6 +166,7 @@ Scenes.bath = {
   },
   update(dt) {
     this.t += dt;
+    careDoneTick(this, dt);
     if (this.done || overlays.length) return;
     const S = careStage(), pet = Game.pet();
     if (this.waitUp) { if (!I.down) this.waitUp = false; return; }
@@ -216,7 +221,7 @@ Scenes.bath = {
         Game.track('bath'); Game.stat('baths');
         Snd.play('clean'); Game.voice(pet);
         burst('sparkle', S.x, S.gy - 60, 26, { speed: 110, props: { size: 4, color: '#ffffff', layer: 1 }, life: 1.4 });
-        setTimeout(() => careDone('Squeaky clean!', [pet.n + ' smells so nice!', 'Clean 100%   +' + xp + ' XP'], () => go('home')), 900);
+        this.doneMsg = ['Squeaky clean!', [pet.n + ' smells so nice!', 'Clean 100%   +' + xp + ' XP']]; this.doneT = 0.9;
       }
     }
   },

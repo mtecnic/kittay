@@ -201,9 +201,15 @@ view.addEventListener('pointermove', (e) => {
 function pointerEnd(e) {
   if (e.pointerId !== I.pid) return;
   toLogical(e);
-  I.down = false; I.released = true; I.pid = null;
-  I.tap = I.moved < 8 && now() - I.st < 0.7;
   Snd.unlock();
+  // a very quick tap can press+release within one frame; deliver the release
+  // next frame so the top-most button (drawn last) owns the press
+  if (I.pressed) { I.pendingUp = true; return; }
+  releasePointer();
+}
+function releasePointer() {
+  I.down = false; I.released = true; I.pid = null; I.pendingUp = false;
+  I.tap = I.moved < 8 && now() - I.st < 0.7;
 }
 view.addEventListener('pointerup', pointerEnd);
 view.addEventListener('pointercancel', (e) => { if (e.pointerId === I.pid) { I.down = false; I.released = true; I.tap = false; I.pid = null; I.moved = 999; } });
@@ -217,10 +223,12 @@ window.addEventListener('keyup', (e) => { I.keys[e.key] = false; });
 function endInputFrame() {
   I.pressed = false; I.released = false; I.tap = false; I.keyPressed = null;
   I.dx = I.x - I.px; I.dy = I.y - I.py; I.px = I.x; I.py = I.y;
+  if (I.pendingUp) releasePointer();
 }
 
 /* ---------- time ---------- */
 let T = 0; // seconds since start (game clock)
+let FRAME = 0;
 const now = () => T;
 
 /* ---------- scenes ---------- */
@@ -297,7 +305,8 @@ const SaveIO = {
     document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=' + this.path;
   },
   enc(obj) {
-    return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+    const json = JSON.stringify(obj, (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v));
+    return btoa(unescape(encodeURIComponent(json)));
   },
   dec(str) {
     try { return JSON.parse(decodeURIComponent(escape(atob(str)))); } catch (e) { return null; }
@@ -1099,7 +1108,7 @@ function hit(x, y, w, h) {
 // core click logic; returns {click, down, over}
 const UI_RECTS = {};
 function uiLogic(id, x, y, w, h, scrolly) {
-  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0];
+  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0, FRAME];
   if (!UI.on) return { click: false, down: false, over: false };
   const over = hit(x, y, w, h);
   if (I.pressed && over) UI.active = id;
@@ -1213,7 +1222,9 @@ function holdButton(id, x, y, w, h, label, color, dt) {
   let p = _holds[id] || 0;
   if (st.down) p += dt / 1.4; else p = Math.max(0, p - dt * 3);
   _holds[id] = p;
-  button(id + '_v', x, y, w, h, { label, color, disabled: false, flat: true });
+  const was = UI.on; UI.on = false;
+  button(id + '_v', x, y, w, h, { label, color, flat: true });
+  UI.on = was;
   if (p > 0) {
     g.globalAlpha = 0.45;
     rect(x + 2, y + 2, (w - 4) * Math.min(1, p), h - 6, '#ffffff');
@@ -2096,7 +2107,7 @@ function petSprite(pet, st) {
   let c = _petCache.get(key);
   if (c) return c;
   c = renderPet(BREEDS[pet.b], stage, st, st.noAcc ? null : pet.eq);
-  if (_petCache.size > 600) _petCache.clear();
+  if (_petCache.size > 360) _petCache.clear();
   _petCache.set(key, c);
   return c;
 }
@@ -2476,8 +2487,24 @@ function fixSave(s) {
   if (s.ap >= s.p.length) s.ap = 0;
   return s;
 }
+// compact form for cookies: item ids -> indexes (lists are append-only, so indexes stay stable)
+function packSave(s) {
+  const idx = (ids, list) => ids.map((id) => list.findIndex((x) => x.id === id)).filter((i) => i >= 0).join('.');
+  const o = Object.assign({}, s);
+  o.acc = idx(s.acc, ACCS); o.room = idx(s.room, ROOM); o.hide = idx(s.hide, ROOM);
+  o.p = s.p.map((p) => { const q = Object.assign({}, p, { s: p.s.map((v) => Math.round(v * 10) / 10) }); delete q.born; return q; });
+  o.pk = 1;
+  return o;
+}
+function unpackSave(o) {
+  if (!o || !o.pk) return o;
+  const ids = (str, list) => (str === '' || str == null ? [] : String(str).split('.').map((i) => list[+i] && list[+i].id).filter(Boolean));
+  o.acc = ids(o.acc, ACCS); o.room = ids(o.room, ROOM); o.hide = ids(o.hide, ROOM);
+  delete o.pk;
+  return o;
+}
 function slotSummary(i) {
-  const s = SaveIO.read(SLOT_KEYS[i]);
+  const s = unpackSave(SaveIO.read(SLOT_KEYS[i]));
   if (!s || !s.p) return null;
   return fixSave(s);
 }
@@ -2490,7 +2517,7 @@ const Game = {
     return RT.pets[i];
   },
   start(slot, save) {
-    SLOT = slot; SAVE = fixSave(save);
+    SLOT = slot; SAVE = fixSave(unpackSave(save));
     RT.pets = []; RT.events = []; RT.notified = new Set(); RT.sleeping = false; RT.giftChecked = false;
     this.applyOffline();
     this.refreshDaily();
@@ -2499,7 +2526,7 @@ const Game = {
   save() {
     if (!SAVE || SLOT < 0) return;
     SAVE.t = Date.now();
-    SaveIO.write(SLOT_KEYS[SLOT], SAVE);
+    SaveIO.write(SLOT_KEYS[SLOT], packSave(SAVE));
     RT.lastSave = T;
   },
   applyOffline() {
@@ -2580,7 +2607,7 @@ const Game = {
     p.xp += n;
     while (p.xp >= petXpNeed(p.lv) && p.lv < 99) {
       p.xp -= petXpNeed(p.lv); p.lv++;
-      RT.events.push({ type: 'level', pet: p });
+      RT.events.push({ type: 'level', pet: p, lv: p.lv });
     }
     const ns = stageOf(p);
     if (ns !== oldStage) RT.events.push({ type: 'grow', pet: p, from: oldStage, to: ns });
@@ -2839,30 +2866,36 @@ Scenes.intro = {
     for (let x = (T * 6) % 16; x < W; x += 16) rect(x, 0, 1, H, '#2a5a6a');
     for (let y = (T * 6) % 16; y < H; y += 16) rect(0, y, W, 1, '#2a5a6a');
     g.globalAlpha = 1;
-    const cx = W / 2, top = H / 2 - 66;
+    const fs = H >= 240 ? 2 : 1; // flask pixel scale
+    const cx = W / 2, top = Math.round(H / 2 - 44 * fs - 6);
     // flask
     const appear = clamp(t / 0.5, 0, 1);
     const level = clamp((t - 0.4) / 1.2, 0, 1);
     const fh = 44, neck = 14;
     const liquid = ['#4fd1a5', '#5ad8ff', '#c3a8ff', '#ff8ac0'][Math.floor(t * 3) % 4];
+    if (level > 0) {
+      g.globalAlpha = 0.12 * level;
+      for (let r = 50; r > 10; r -= 10) disc(cx, top + (fh - 12) * fs, r * fs * 0.6, liquid);
+      g.globalAlpha = 1;
+    }
     for (let y = 0; y < fh; y++) {
       if (hash2(y, 0, 3) > appear) continue;
       const hw = y < neck ? 4 : Math.min(15, 4 + (y - neck) * 0.62);
-      const yy = top + y;
-      rect(cx - hw - 2, yy, hw * 2 + 4, 1, '#ffffff');
-      rect(cx - hw - 1, yy, hw * 2 + 2, 1, '#1a2a3a');
+      const yy = top + y * fs;
+      rect(cx - (hw + 2) * fs, yy, (hw * 2 + 4) * fs, fs, '#ffffff');
+      rect(cx - (hw + 1) * fs, yy, (hw * 2 + 2) * fs, fs, '#1a2a3a');
       const filled = y > fh - 2 - (fh - neck - 2) * level;
       if (filled) {
-        rect(cx - hw - 1, yy, hw * 2 + 2, 1, liquid);
-        if (y % 3 === 0) rect(cx - hw, yy, 1, 1, '#ffffff');
+        rect(cx - (hw + 1) * fs, yy, (hw * 2 + 2) * fs, fs, liquid);
+        if (y % 3 === 0) rect(cx - hw * fs, yy, fs, fs, '#ffffff');
       }
     }
-    rect(cx - 7, top - 2, 14, 3, '#ffffff');
-    rect(cx - 6, top - 1, 12, 1, '#a8f0ff');
-    rect(cx - 10, top + fh, 20, 2, '#ffffff');
+    rect(cx - 7 * fs, top - 2 * fs, 14 * fs, 3 * fs, '#ffffff');
+    rect(cx - 6 * fs, top - fs, 12 * fs, fs, '#a8f0ff');
+    rect(cx - 10 * fs, top + fh * fs, 20 * fs, 2 * fs, '#ffffff');
     // glass shine
-    if (appear >= 1) for (let y = neck + 4; y < fh - 6; y++) rect(cx - 4 - (y - neck) * 0.5, top + y, 1, 1, 'rgba(255,255,255,0.7)');
-    for (const b of this.bubbles) ring(cx + b.x + Math.sin(b.w) * 2, top + b.y, b.r, liquid);
+    if (appear >= 1) for (let y = neck + 4; y < fh - 6; y++) rect(cx - (4 + (y - neck) * 0.5) * fs, top + y * fs, fs, fs, 'rgba(255,255,255,0.7)');
+    for (const b of this.bubbles) ring(cx + (b.x + Math.sin(b.w) * 2) * fs, top + b.y * fs, b.r * fs, liquid);
     // flash
     if (t > 1.7 && t < 2.0) { g.globalAlpha = 1 - (t - 1.7) / 0.3; rect(0, 0, W, H, '#ffffff'); g.globalAlpha = 1; }
     // MTEC letters drop in
@@ -2870,7 +2903,7 @@ Scenes.intro = {
     const sc = W < 280 ? 4 : 5;
     const lw = 6 * sc;
     const startX = cx - (lw * 4 - sc) / 2;
-    const ly = top + fh + 14;
+    const ly = top + fh * fs + 12;
     for (let i = 0; i < 4; i++) {
       const lt = t - 1.75 - i * 0.12;
       if (lt < 0) continue;
@@ -2919,7 +2952,11 @@ Scenes.title = {
 
 /* ---------- main menu ---------- */
 Scenes.menu = {
-  enter() { this.t = 0; Music.play('title'); },
+  enter() {
+    this.t = 0; Music.play('title');
+    // leaving a game: save it and unload so nothing writes to that slot any more
+    if (SAVE) { Game.save(); SAVE = null; SLOT = -1; RT.sleeping = false; }
+  },
   update(dt) { this.t += dt; },
   draw(dt) {
     drawDreamBG(dt);
@@ -2939,6 +2976,13 @@ Scenes.menu = {
       if (button('menu' + i, x, top + i * (bh + 8), bw, bh + (i === 0 ? 4 : 0), { label: lab, color: col, scale: i === 0 ? 2 : 1 })) fn();
     });
     text('v' + VERSION, 4, 4, { color: '#ffffff', shadow: '#5a6ac8' });
+    // iPad Safari: suggest installing to the Home Screen (full screen + safer saves)
+    if (navigator.standalone === false && this.t > 1.5) {
+      const msg = 'Tip: tap Share, then "Add to Home Screen"!';
+      const tw = textWidth(msg) + 12;
+      rrect(W / 2 - tw / 2, H - 46, tw, 14, 'rgba(42,26,58,0.75)', 3);
+      text(msg, W / 2, H - 43, { align: 'center', color: '#ffffff' });
+    }
   },
 };
 
@@ -3001,7 +3045,7 @@ Scenes.slots = {
         if (!port) text('Player ' + (i + 1), x + cw / 2, yy + 6, { color: '#ffffff', align: 'center', shadow: pal.d });
       }
       g.globalAlpha = 1;
-      if (st.click && !UI.blockClick) {
+      if (st.click && !overlays.length) {
         Snd.play('click');
         if (s) { Game.start(i, s); go('home'); }
         else this.newPlayer(i);
@@ -3026,6 +3070,7 @@ Scenes.slots = {
         wrapText('Delete ' + s.n + ' and all of their pets? This can NOT be undone!', w - 24).forEach((l, k) => text(l, W / 2, y + 18 + k * 10, { align: 'center' }));
         text('Hold the red button', W / 2, y + 52, { align: 'center', color: COL.redD });
         if (holdButton('holddel', x + 14, y + h - 34, w / 2 - 20, 24, 'Hold...', 'red', dt)) {
+          if (i === SLOT) { SAVE = null; SLOT = -1; }
           SaveIO.remove(SLOT_KEYS[i]); self.data[i] = null; popOverlay(ov); Snd.play('whoosh');
         }
         if (button('keep', x + w / 2 + 6, y + h - 34, w / 2 - 20, 24, { label: 'Keep', color: 'mint' })) popOverlay(ov);
@@ -3036,7 +3081,7 @@ Scenes.slots = {
 
 /* ---------- name entry with on-screen keyboard ---------- */
 Scenes.name = {
-  enter(a) { this.a = a; this.val = a.initial || ''; this.t = 0; },
+  enter(a) { this.a = a; this.val = a.initial || ''; this.t = 0; this.submitted = false; },
   update(dt) {
     this.t += dt;
     const k = I.keyPressed;
@@ -3055,8 +3100,10 @@ Scenes.name = {
     Snd.play('type');
   },
   done() {
+    if (this.submitted || Trans.dir !== 0) return;
     const v = this.val.trim();
     if (!v) { Snd.play('error'); this.shake = 0.4; return; }
+    this.submitted = true;
     Snd.play('coin');
     this.a.onDone(v);
   },
@@ -3624,13 +3671,18 @@ Scenes.home = {
     this.food = null; this.loveMeter = 0; this.petMode = false; this.welcome = a.welcome ? { t: 0, opened: false, box: true } : null;
     this.purrT = 0; this.messHint = 0;
     const rt = Game.rt();
-    rt.x = W / 2; rt.state = 'idle'; rt.t = 0; rt.dur = 2; rt.jump = 0; rt.jumpV = 0; rt.trick = null; rt.say = '';
+    rt.x = W / 2; rt.state = 'idle'; rt.t = 0; rt.dur = 2; rt.jump = 0; rt.jumpV = 0; rt.trick = null; rt.say = ''; rt.onArrive = null;
     if (RT.sleeping) { rt.state = 'sleep'; rt.x = this.L.bedX; }
     Music.play(RT.sleeping ? 'night' : 'home');
     if (!a.welcome && RT.awayMins > 90) { Toasts.add(Game.pet().n + ' missed you!', 'heart', 'pink'); RT.awayMins = 0; }
     this.toldTired = false;
   },
-  leave() { Game.save(); },
+  leave() {
+    // food that was put in the bowl but not eaten goes back in the cupboard
+    if (this.food && this.food.id !== 'kibble' && SAVE) SAVE.inv[this.food.id] = (SAVE.inv[this.food.id] || 0) + 1;
+    this.food = null;
+    Game.save();
+  },
   pet() { return Game.pet(); },
   update(dt) {
     this.t += dt;
@@ -3659,6 +3711,7 @@ Scenes.home = {
       Music.play('night');
     } else {
       if (pet.s[2] - (this.napStart || 0) >= 15) { Game.track('nap'); Game.addXP(5); }
+      rt.onArrive = null;
       rt.state = 'react'; rt.t = 0; rt.jumpV = -90; rt.expr = 'happy';
       Music.play('home');
     }
@@ -3688,7 +3741,7 @@ Scenes.home = {
     const canTouch = UI.on && !this.welcome && overlays.length === 0;
     if (canTouch && I.down && over && I.moved > 10 && rt.state !== 'sleep' && rt.state !== 'eat') {
       // petting
-      if (rt.state !== 'petted') { rt.state = 'petted'; rt.t = 0; }
+      if (rt.state !== 'petted') { rt.state = 'petted'; rt.t = 0; rt.onArrive = null; }
       rt.petT = 0.4;
       const d = Math.hypot(I.dx, I.dy);
       this.loveMeter += d;
@@ -3701,7 +3754,7 @@ Scenes.home = {
     if (canTouch && I.released && I.tap && over && rt.state !== 'eat') {
       if (rt.state === 'sleep') { rt.say = 'Zzz...'; rt.sayT = 1.2; }
       else {
-        rt.state = 'react'; rt.t = 0; rt.jumpV = -110; rt.expr = pick(['happy', 'love', 'wow']);
+        rt.state = 'react'; rt.t = 0; rt.jumpV = -110; rt.expr = pick(['happy', 'love', 'wow']); rt.onArrive = null;
         Game.voice(pet);
         burst('heart', rt.x, box.y + 10, 3, { speed: 40, props: { vy: -40, layer: 1 }, life: 0.9 });
         if (!this.boopT || T - this.boopT > 3) { Game.boost(1, 2); this.boopT = T; }
@@ -3803,6 +3856,11 @@ Scenes.home = {
   chooseIdle(pet, rt, L) {
     const r = Math.random();
     rt.t = 0;
+    if (this.food) { // food still waiting in the bowl
+      rt.state = 'walk'; rt.tx = L.bowlX + 26;
+      rt.onArrive = () => { rt.state = 'eat'; rt.t = 0; rt.face = -1; Snd.play('eat'); };
+      return;
+    }
     const tired = pet.s[2] < 30;
     if (r < 0.1 && Game.hasFurn('tree') && !Game.isDog(pet) && !tired) {
       rt.state = 'walk'; rt.tx = clamp(W - L.sideS - 42, L.minX, L.maxX);
@@ -3865,7 +3923,7 @@ Scenes.home = {
   doTrick(tr) {
     const rt = Game.rt();
     if (RT.sleeping) this.setSleep(false);
-    rt.state = 'trick'; rt.trick = tr.id; rt.t = 0;
+    rt.state = 'trick'; rt.trick = tr.id; rt.t = 0; rt.onArrive = null; rt.jump = 0; rt.jumpV = 0;
     Game.track('trick'); Game.boost(1, 3);
     Snd.play(tr.id === 'jump' || tr.id === 'roll' ? 'jump' : 'sparkle');
     if (tr.id === 'dance') Snd.play('fanfare');
@@ -4188,7 +4246,8 @@ function showEvent(ev) {
   if (ev.type === 'grow') { showGrow(ev); return; }
   const pet = ev.pet;
   if (ev.type === 'level') {
-    const reward = 10 + pet.lv * 3;
+    const lvNow = ev.lv || pet.lv;
+    const reward = 10 + lvNow * 3;
     Snd.play('levelup');
     confetti(60);
     const ov = pushOverlay({
@@ -4204,7 +4263,7 @@ function showEvent(ev) {
           line(W / 2, y + 58, W / 2 + Math.cos(a) * 40, y + 58 + Math.sin(a) * 40, i % 2 ? '#ffe8a0' : '#fff4d0', 2);
         }
         drawPet(pet, W / 2, y + 86, 2, { expr: 'star', tail: Math.round(Math.sin(T * 8) * 2), pawR: Math.abs(Math.sin(T * 4)) });
-        text(pet.n + ' is now Level ' + pet.lv + '!', W / 2, y + 94, { align: 'center', color: COL.ink });
+        text(pet.n + ' is now Level ' + lvNow + '!', W / 2, y + 94, { align: 'center', color: COL.ink });
         coinLabel(W / 2, y + 108, '+' + reward, 'center');
         if (button('lvok', W / 2 - 40, y + h - 30, 80, 22, { label: 'Yay!', color: 'pink' })) { popOverlay(ov); Game.addCoins(reward, W / 2, y + 110); Game.save(); }
       },
@@ -4277,13 +4336,12 @@ function showGrow(ev) {
 }
 
 function showDailyGift() {
-  const y = new Date(Date.now() - 864e5);
-  SAVE.streak = SAVE.gift === dayKey(y) ? SAVE.streak + 1 : 1;
-  SAVE.gift = dayKey();
-  const coins = 15 + 10 * Math.min(SAVE.streak, 7);
+  const now = new Date();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const streak = SAVE.gift === dayKey(yesterday) ? SAVE.streak + 1 : 1;
+  const coins = 15 + 10 * Math.min(streak, 7);
   const foodPool = FOODS.filter((f) => f.price > 0 && f.lv <= SAVE.ol + 1);
   const food = pick(foodPool);
-  Game.checkAdventures();
   const ov = pushOverlay({
     t: 0, opened: false, ot: 0,
     update(dt) { this.t += dt; if (this.opened) this.ot += dt; },
@@ -4291,7 +4349,7 @@ function showDailyGift() {
       g.fillStyle = 'rgba(18,10,30,0.65)'; g.fillRect(0, 0, W, H);
       const w = Math.min(W - 30, 220), h = 150, x = W / 2 - w / 2, yy = H / 2 - h / 2;
       panel(x, yy, w, h, { title: 'Daily Gift!', color: 'pink' });
-      text('Day ' + SAVE.streak + ' in a row!', W / 2, yy + 14, { align: 'center', color: COL.purpleD });
+      text('Day ' + streak + ' in a row!', W / 2, yy + 14, { align: 'center', color: COL.purpleD });
       if (!this.opened) {
         const wig = Math.sin(this.t * 14) * (Math.sin(this.t * 3) > 0 ? 2 : 0);
         iconC('gift', W / 2 + wig, yy + 64, 4);
@@ -4299,6 +4357,7 @@ function showDailyGift() {
         if (button('giftbtn', W / 2 - 50, yy + h - 32, 100, 24, { label: 'Open!', color: 'pink', glow: true }) ||
           (UI.on && I.released && I.tap && Math.abs(I.x - W / 2) < 40 && Math.abs(I.y - yy - 64) < 30)) {
           this.opened = true; Snd.play('gift'); confetti(50);
+          SAVE.streak = streak; SAVE.gift = dayKey(); Game.checkAdventures();
           burst('star', W / 2, yy + 64, 14, { speed: 90, props: { layer: 1 } });
           Game.addCoins(coins, W / 2, yy + 64);
           SAVE.inv[food.id] = (SAVE.inv[food.id] || 0) + 1;
@@ -4415,11 +4474,14 @@ function careDone(title, lines, onOk) {
 }
 
 /* ---------- Brush ---------- */
+function careDoneTick(sc, dt) {
+  if (sc.doneT > 0) { sc.doneT -= dt; if (sc.doneT <= 0) careDone(sc.doneMsg[0], sc.doneMsg[1], () => go('home')); }
+}
 Scenes.brush = {
   sim: true,
   enter() {
     const pet = Game.pet();
-    this.t = 0; this.done = false; this.swT = 0; this.startCoat = pet.s[4];
+    this.t = 0; this.done = false; this.doneT = 0; this.swT = 0; this.startCoat = pet.s[4];
     const n = clamp(Math.round((100 - pet.s[4]) / 12) + 3, 3, 9);
     const pts = spritePixels(pet, { expr: 'open', noAcc: true }).filter(([x, y]) => y < POY - 3);
     this.tangles = [];
@@ -4436,6 +4498,7 @@ Scenes.brush = {
   scr(t) { const S = careStage(); return [S.x + (t.px - POX) * S.sc, S.gy + (t.py - POY) * S.sc]; },
   update(dt) {
     this.t += dt;
+    careDoneTick(this, dt);
     if (this.done || overlays.length) return;
     const pet = Game.pet();
     if (I.down && UI.on) {
@@ -4471,7 +4534,7 @@ Scenes.brush = {
       Game.addXP(xp);
       Game.addCoins(4, S.x, S.gy - 60);
       Game.track('brush'); Game.stat('brushes');
-      setTimeout(() => careDone('So fluffy!', [pet.n + ' looks amazing!', 'Fluff 100%   +' + xp + ' XP'], () => go('home')), 900);
+      this.doneMsg = ['So fluffy!', [pet.n + ' looks amazing!', 'Fluff 100%   +' + xp + ' XP']]; this.doneT = 0.9;
     }
   },
   draw(dt) {
@@ -4526,7 +4589,7 @@ Scenes.brush = {
 Scenes.bath = {
   sim: true,
   enter() {
-    this.t = 0; this.step = 0; this.bubbles = []; this.drops = []; this.wet = 1; this.acc = 0; this.done = false; this.sfxT = 0;
+    this.t = 0; this.step = 0; this.bubbles = []; this.drops = []; this.wet = 1; this.acc = 0; this.done = false; this.sfxT = 0; this.doneT = 0; this.waitUp = false;
     this.pts = spritePixels(Game.pet(), { expr: 'open', noAcc: true }).filter(([x, y]) => y < POY - 2);
     this.maxBubbles = 30;
     this.startClean = Game.pet().s[3];
@@ -4540,6 +4603,7 @@ Scenes.bath = {
   },
   update(dt) {
     this.t += dt;
+    careDoneTick(this, dt);
     if (this.done || overlays.length) return;
     const S = careStage(), pet = Game.pet();
     if (this.waitUp) { if (!I.down) this.waitUp = false; return; }
@@ -4594,7 +4658,7 @@ Scenes.bath = {
         Game.track('bath'); Game.stat('baths');
         Snd.play('clean'); Game.voice(pet);
         burst('sparkle', S.x, S.gy - 60, 26, { speed: 110, props: { size: 4, color: '#ffffff', layer: 1 }, life: 1.4 });
-        setTimeout(() => careDone('Squeaky clean!', [pet.n + ' smells so nice!', 'Clean 100%   +' + xp + ' XP'], () => go('home')), 900);
+        this.doneMsg = ['Squeaky clean!', [pet.n + ' smells so nice!', 'Clean 100%   +' + xp + ' XP']]; this.doneT = 0.9;
       }
     }
   },
@@ -4885,6 +4949,8 @@ const MG = {
     Game.checkAdventures();
     Snd.play(newBest ? 'fanfare' : 'levelup');
     if (newBest) confetti(70);
+    Game.addCoins(coins);
+    Game.save();
     const ov = pushOverlay({
       t: 0, paid: false, update(dt) { this.t += dt; },
       draw() {
@@ -4899,7 +4965,11 @@ const MG = {
         coinLabel(x + 20, y + 76, '+' + coins);
         text('+' + xp + ' XP', x + 90, y + 79, { color: '#ffffff', outline: COL.ink });
         text('Fun +20', x + 140, y + 79, { color: '#ff9ac8', outline: COL.ink });
-        if (!this.paid && this.t > 0.4) { this.paid = true; Game.addCoins(coins, x + 26, y + 80); Game.save(); }
+        if (!this.paid && this.t > 0.4) {
+          this.paid = true;
+          for (let i = 0; i < Math.min(10, Math.ceil(coins / 4)); i++) Particles.add({ type: 'coin', x0: x + 26, y0: y + 80, tx: x + 26, ty: y + 70, arc: rnd(-30, 30), life: 0.5 + i * 0.05, layer: 1 });
+          Snd.play('coin');
+        }
         const bw = (w - 30) / 2;
         const tired = pet.s[2] < 15;
         if (button('mgagain', x + 10, y + h - 32, bw, 24, { label: tired ? 'Too tired' : 'Again!', color: 'mint', disabled: tired })) { popOverlay(ov); go(id); }
@@ -4919,7 +4989,7 @@ Scenes.yarn = {
   },
   leave() { Game.save(); },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt; this.time -= dt;
     this.hitT = Math.max(0, this.hitT - dt); this.happyT = Math.max(0, this.happyT - dt);
     if (I.down && UI.on && I.y > 26) this.px = lerp(this.px, clamp(I.x, 20, W - 20), Math.min(1, dt * 14));
@@ -5011,16 +5081,22 @@ Scenes.mouse = {
   enter() {
     MG.start(this);
     this.time = 40; this.spawnT = 0.4;
-    const cols = PORTRAIT ? 2 : 3, rows = PORTRAIT ? 3 : 2;
     this.holes = [];
+    for (let i = 0; i < 6; i++) this.holes.push({ x: 0, y: 0, kind: null, t: 0, life: 0, hit: false });
+    this.layoutHoles();
+    this.petJump = 0; this.petExpr = 'open'; this.exprT = 0;
+  },
+  layoutHoles() {
+    this.lv = layoutVersion;
+    const cols = PORTRAIT ? 2 : 3, rows = PORTRAIT ? 3 : 2;
     const top = 46, bottom = H - 70;
     const cw = (W - 40) / cols, rh = (bottom - top) / rows;
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) this.holes.push({ x: 20 + cw * (c + 0.5), y: top + rh * (r + 0.75), kind: null, t: 0, life: 0, hit: false });
-    this.petJump = 0; this.petExpr = 'open'; this.exprT = 0;
+    this.holes.forEach((h, i) => { const r = Math.floor(i / cols), c = i % cols; h.x = 20 + cw * (c + 0.5); h.y = top + rh * (r + 0.75); });
   },
   leave() { Game.save(); },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (this.lv !== layoutVersion) this.layoutHoles();
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt; this.time -= dt;
     this.exprT -= dt; if (this.exprT <= 0) this.petExpr = 'open';
     this.petJump = Math.max(0, this.petJump - dt * 3);
@@ -5114,7 +5190,7 @@ Scenes.run = {
     }
   },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt;
     if ((I.pressed && UI.on && !(I.x > W - 32 && I.y < 26)) || I.keyPressed === ' ' || I.keyPressed === 'ArrowUp') this.jump();
     this.speed = Math.min(270, 110 + this.t * 4);
@@ -5676,7 +5752,7 @@ function showBackup(slot) {
   const io = document.getElementById('io');
   const inGame = slot == null;
   if (inGame) { Game.save(); slot = SLOT; }
-  const code = inGame ? 'KITTAY1:' + SaveIO.enc(SAVE) : '';
+  const code = inGame ? 'KITTAY1:' + SaveIO.enc(packSave(SAVE)) : '';
   io.innerHTML = '<div class="box"><h3>' + (inGame ? 'Backup Save' : 'Restore Slot ' + (slot + 1)) + '</h3>' +
     '<p>' + (inGame ? 'Copy this code and keep it somewhere safe (like the Notes app). To restore, paste a code below and tap Load.' : 'Paste a Kittay backup code below and tap Load. This replaces whatever is in this slot!') + '</p>' +
     '<textarea id="iocode" spellcheck="false"></textarea>' +
@@ -5697,10 +5773,10 @@ function showBackup(slot) {
   };
   document.getElementById('ioload').onclick = () => {
     const v = ta.value.trim().replace(/^KITTAY1:/, '');
-    const data = SaveIO.dec(v);
+    const data = unpackSave(SaveIO.dec(v));
     if (!data || !Array.isArray(data.p) || !data.p.length) { msg.textContent = "Hmm, that code doesn't look right."; return; }
     data.t = Date.now();
-    SaveIO.write(SLOT_KEYS[slot], fixSave(data));
+    SaveIO.write(SLOT_KEYS[slot], packSave(fixSave(data)));
     close();
     Game.start(slot, fixSave(data));
     Toasts.add('Save restored! Welcome back, ' + data.n + '!', 'heart', 'mint');
@@ -5746,7 +5822,7 @@ function frame(ts) {
   lastTs = ts;
   if (!(dt > 0)) dt = 1 / 60;
   dt = Math.min(dt, 0.05);
-  DT = dt; T += dt;
+  DT = dt; T += dt; FRAME++;
   try {
     updateTransition(dt);
     if (SAVE && scene && scene.sim) Game.tick(dt);
@@ -5756,7 +5832,6 @@ function frame(ts) {
     for (const o of overlays.slice()) if (o.update) o.update(dt);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = 1;
-    UI.justOpened = false;
     UI.on = overlays.length === 0 && Trans.dir === 0;
     UI.clip = null;
     if (scene) scene.draw(dt);
@@ -5777,6 +5852,7 @@ function frame(ts) {
   }
   if (QS.has('debug') && lastErr) text(lastErr.slice(0, 80), 2, H - 9, { color: '#ff0', shadow: '#000' });
   if (I.released) UI.active = null;
+  UI.justOpened = false;
   endInputFrame();
   vctx.imageSmoothingEnabled = false;
   vctx.drawImage(buf, 0, 0, view.width, view.height);
@@ -5906,7 +5982,16 @@ Scenes.icon = {
 };
 
 function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { saveNow(); return; }
+  // back from the background (iPad keeps tabs alive for days): catch up on time away
+  if (SAVE && SLOT >= 0) {
+    Game.applyOffline();
+    Game.refreshDaily();
+    RT.giftChecked = false;
+    Game.save();
+  }
+});
 window.addEventListener('pagehide', saveNow);
 
 function boot() {
@@ -5916,7 +6001,7 @@ function boot() {
   else go('boot', null, true);
   requestAnimationFrame(frame);
 }
-if (QS.has('test') || QS.has('debug')) window.KT = { get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
+if (QS.has('test') || QS.has('debug')) window.KT = { packSave, unpackSave, SaveIO, slotSummary, get FRAME() { return FRAME; }, get errs() { return errCount; }, get lastErr() { return lastErr; }, get W() { return W; }, get H() { return H; }, R: UI_RECTS, get scene() { return scene; }, get RT() { return RT; }, go, Scenes, Game, get SAVE() { return SAVE; }, set SAVE(v) { SAVE = v; }, I, overlays, newSave, newPet, Snd };
 boot();
 
 })();

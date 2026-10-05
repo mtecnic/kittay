@@ -158,30 +158,36 @@ Scenes.intro = {
     for (let x = (T * 6) % 16; x < W; x += 16) rect(x, 0, 1, H, '#2a5a6a');
     for (let y = (T * 6) % 16; y < H; y += 16) rect(0, y, W, 1, '#2a5a6a');
     g.globalAlpha = 1;
-    const cx = W / 2, top = H / 2 - 66;
+    const fs = H >= 240 ? 2 : 1; // flask pixel scale
+    const cx = W / 2, top = Math.round(H / 2 - 44 * fs - 6);
     // flask
     const appear = clamp(t / 0.5, 0, 1);
     const level = clamp((t - 0.4) / 1.2, 0, 1);
     const fh = 44, neck = 14;
     const liquid = ['#4fd1a5', '#5ad8ff', '#c3a8ff', '#ff8ac0'][Math.floor(t * 3) % 4];
+    if (level > 0) {
+      g.globalAlpha = 0.12 * level;
+      for (let r = 50; r > 10; r -= 10) disc(cx, top + (fh - 12) * fs, r * fs * 0.6, liquid);
+      g.globalAlpha = 1;
+    }
     for (let y = 0; y < fh; y++) {
       if (hash2(y, 0, 3) > appear) continue;
       const hw = y < neck ? 4 : Math.min(15, 4 + (y - neck) * 0.62);
-      const yy = top + y;
-      rect(cx - hw - 2, yy, hw * 2 + 4, 1, '#ffffff');
-      rect(cx - hw - 1, yy, hw * 2 + 2, 1, '#1a2a3a');
+      const yy = top + y * fs;
+      rect(cx - (hw + 2) * fs, yy, (hw * 2 + 4) * fs, fs, '#ffffff');
+      rect(cx - (hw + 1) * fs, yy, (hw * 2 + 2) * fs, fs, '#1a2a3a');
       const filled = y > fh - 2 - (fh - neck - 2) * level;
       if (filled) {
-        rect(cx - hw - 1, yy, hw * 2 + 2, 1, liquid);
-        if (y % 3 === 0) rect(cx - hw, yy, 1, 1, '#ffffff');
+        rect(cx - (hw + 1) * fs, yy, (hw * 2 + 2) * fs, fs, liquid);
+        if (y % 3 === 0) rect(cx - hw * fs, yy, fs, fs, '#ffffff');
       }
     }
-    rect(cx - 7, top - 2, 14, 3, '#ffffff');
-    rect(cx - 6, top - 1, 12, 1, '#a8f0ff');
-    rect(cx - 10, top + fh, 20, 2, '#ffffff');
+    rect(cx - 7 * fs, top - 2 * fs, 14 * fs, 3 * fs, '#ffffff');
+    rect(cx - 6 * fs, top - fs, 12 * fs, fs, '#a8f0ff');
+    rect(cx - 10 * fs, top + fh * fs, 20 * fs, 2 * fs, '#ffffff');
     // glass shine
-    if (appear >= 1) for (let y = neck + 4; y < fh - 6; y++) rect(cx - 4 - (y - neck) * 0.5, top + y, 1, 1, 'rgba(255,255,255,0.7)');
-    for (const b of this.bubbles) ring(cx + b.x + Math.sin(b.w) * 2, top + b.y, b.r, liquid);
+    if (appear >= 1) for (let y = neck + 4; y < fh - 6; y++) rect(cx - (4 + (y - neck) * 0.5) * fs, top + y * fs, fs, fs, 'rgba(255,255,255,0.7)');
+    for (const b of this.bubbles) ring(cx + (b.x + Math.sin(b.w) * 2) * fs, top + b.y * fs, b.r * fs, liquid);
     // flash
     if (t > 1.7 && t < 2.0) { g.globalAlpha = 1 - (t - 1.7) / 0.3; rect(0, 0, W, H, '#ffffff'); g.globalAlpha = 1; }
     // MTEC letters drop in
@@ -189,7 +195,7 @@ Scenes.intro = {
     const sc = W < 280 ? 4 : 5;
     const lw = 6 * sc;
     const startX = cx - (lw * 4 - sc) / 2;
-    const ly = top + fh + 14;
+    const ly = top + fh * fs + 12;
     for (let i = 0; i < 4; i++) {
       const lt = t - 1.75 - i * 0.12;
       if (lt < 0) continue;
@@ -238,7 +244,11 @@ Scenes.title = {
 
 /* ---------- main menu ---------- */
 Scenes.menu = {
-  enter() { this.t = 0; Music.play('title'); },
+  enter() {
+    this.t = 0; Music.play('title');
+    // leaving a game: save it and unload so nothing writes to that slot any more
+    if (SAVE) { Game.save(); SAVE = null; SLOT = -1; RT.sleeping = false; }
+  },
   update(dt) { this.t += dt; },
   draw(dt) {
     drawDreamBG(dt);
@@ -258,6 +268,13 @@ Scenes.menu = {
       if (button('menu' + i, x, top + i * (bh + 8), bw, bh + (i === 0 ? 4 : 0), { label: lab, color: col, scale: i === 0 ? 2 : 1 })) fn();
     });
     text('v' + VERSION, 4, 4, { color: '#ffffff', shadow: '#5a6ac8' });
+    // iPad Safari: suggest installing to the Home Screen (full screen + safer saves)
+    if (navigator.standalone === false && this.t > 1.5) {
+      const msg = 'Tip: tap Share, then "Add to Home Screen"!';
+      const tw = textWidth(msg) + 12;
+      rrect(W / 2 - tw / 2, H - 46, tw, 14, 'rgba(42,26,58,0.75)', 3);
+      text(msg, W / 2, H - 43, { align: 'center', color: '#ffffff' });
+    }
   },
 };
 
@@ -320,7 +337,7 @@ Scenes.slots = {
         if (!port) text('Player ' + (i + 1), x + cw / 2, yy + 6, { color: '#ffffff', align: 'center', shadow: pal.d });
       }
       g.globalAlpha = 1;
-      if (st.click && !UI.blockClick) {
+      if (st.click && !overlays.length) {
         Snd.play('click');
         if (s) { Game.start(i, s); go('home'); }
         else this.newPlayer(i);
@@ -345,6 +362,7 @@ Scenes.slots = {
         wrapText('Delete ' + s.n + ' and all of their pets? This can NOT be undone!', w - 24).forEach((l, k) => text(l, W / 2, y + 18 + k * 10, { align: 'center' }));
         text('Hold the red button', W / 2, y + 52, { align: 'center', color: COL.redD });
         if (holdButton('holddel', x + 14, y + h - 34, w / 2 - 20, 24, 'Hold...', 'red', dt)) {
+          if (i === SLOT) { SAVE = null; SLOT = -1; }
           SaveIO.remove(SLOT_KEYS[i]); self.data[i] = null; popOverlay(ov); Snd.play('whoosh');
         }
         if (button('keep', x + w / 2 + 6, y + h - 34, w / 2 - 20, 24, { label: 'Keep', color: 'mint' })) popOverlay(ov);
@@ -355,7 +373,7 @@ Scenes.slots = {
 
 /* ---------- name entry with on-screen keyboard ---------- */
 Scenes.name = {
-  enter(a) { this.a = a; this.val = a.initial || ''; this.t = 0; },
+  enter(a) { this.a = a; this.val = a.initial || ''; this.t = 0; this.submitted = false; },
   update(dt) {
     this.t += dt;
     const k = I.keyPressed;
@@ -374,8 +392,10 @@ Scenes.name = {
     Snd.play('type');
   },
   done() {
+    if (this.submitted || Trans.dir !== 0) return;
     const v = this.val.trim();
     if (!v) { Snd.play('error'); this.shake = 0.4; return; }
+    this.submitted = true;
     Snd.play('coin');
     this.a.onDone(v);
   },

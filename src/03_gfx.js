@@ -237,7 +237,7 @@ function hit(x, y, w, h) {
 // core click logic; returns {click, down, over}
 const UI_RECTS = {};
 function uiLogic(id, x, y, w, h, scrolly) {
-  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0];
+  UI_RECTS[id] = [x + w / 2, y + h / 2, UI.on ? 1 : 0, FRAME];
   if (!UI.on) return { click: false, down: false, over: false };
   const over = hit(x, y, w, h);
   if (I.pressed && over) UI.active = id;
@@ -351,7 +351,9 @@ function holdButton(id, x, y, w, h, label, color, dt) {
   let p = _holds[id] || 0;
   if (st.down) p += dt / 1.4; else p = Math.max(0, p - dt * 3);
   _holds[id] = p;
-  button(id + '_v', x, y, w, h, { label, color, disabled: false, flat: true });
+  const was = UI.on; UI.on = false;
+  button(id + '_v', x, y, w, h, { label, color, flat: true });
+  UI.on = was;
   if (p > 0) {
     g.globalAlpha = 0.45;
     rect(x + 2, y + 2, (w - 4) * Math.min(1, p), h - 6, '#ffffff');

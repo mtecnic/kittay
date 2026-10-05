@@ -447,7 +447,7 @@ function showBackup(slot) {
   const io = document.getElementById('io');
   const inGame = slot == null;
   if (inGame) { Game.save(); slot = SLOT; }
-  const code = inGame ? 'KITTAY1:' + SaveIO.enc(SAVE) : '';
+  const code = inGame ? 'KITTAY1:' + SaveIO.enc(packSave(SAVE)) : '';
   io.innerHTML = '<div class="box"><h3>' + (inGame ? 'Backup Save' : 'Restore Slot ' + (slot + 1)) + '</h3>' +
     '<p>' + (inGame ? 'Copy this code and keep it somewhere safe (like the Notes app). To restore, paste a code below and tap Load.' : 'Paste a Kittay backup code below and tap Load. This replaces whatever is in this slot!') + '</p>' +
     '<textarea id="iocode" spellcheck="false"></textarea>' +
@@ -468,10 +468,10 @@ function showBackup(slot) {
   };
   document.getElementById('ioload').onclick = () => {
     const v = ta.value.trim().replace(/^KITTAY1:/, '');
-    const data = SaveIO.dec(v);
+    const data = unpackSave(SaveIO.dec(v));
     if (!data || !Array.isArray(data.p) || !data.p.length) { msg.textContent = "Hmm, that code doesn't look right."; return; }
     data.t = Date.now();
-    SaveIO.write(SLOT_KEYS[slot], fixSave(data));
+    SaveIO.write(SLOT_KEYS[slot], packSave(fixSave(data)));
     close();
     Game.start(slot, fixSave(data));
     Toasts.add('Save restored! Welcome back, ' + data.n + '!', 'heart', 'mint');

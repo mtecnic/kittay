@@ -51,6 +51,8 @@ const MG = {
     Game.checkAdventures();
     Snd.play(newBest ? 'fanfare' : 'levelup');
     if (newBest) confetti(70);
+    Game.addCoins(coins);
+    Game.save();
     const ov = pushOverlay({
       t: 0, paid: false, update(dt) { this.t += dt; },
       draw() {
@@ -65,7 +67,11 @@ const MG = {
         coinLabel(x + 20, y + 76, '+' + coins);
         text('+' + xp + ' XP', x + 90, y + 79, { color: '#ffffff', outline: COL.ink });
         text('Fun +20', x + 140, y + 79, { color: '#ff9ac8', outline: COL.ink });
-        if (!this.paid && this.t > 0.4) { this.paid = true; Game.addCoins(coins, x + 26, y + 80); Game.save(); }
+        if (!this.paid && this.t > 0.4) {
+          this.paid = true;
+          for (let i = 0; i < Math.min(10, Math.ceil(coins / 4)); i++) Particles.add({ type: 'coin', x0: x + 26, y0: y + 80, tx: x + 26, ty: y + 70, arc: rnd(-30, 30), life: 0.5 + i * 0.05, layer: 1 });
+          Snd.play('coin');
+        }
         const bw = (w - 30) / 2;
         const tired = pet.s[2] < 15;
         if (button('mgagain', x + 10, y + h - 32, bw, 24, { label: tired ? 'Too tired' : 'Again!', color: 'mint', disabled: tired })) { popOverlay(ov); go(id); }
@@ -85,7 +91,7 @@ Scenes.yarn = {
   },
   leave() { Game.save(); },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt; this.time -= dt;
     this.hitT = Math.max(0, this.hitT - dt); this.happyT = Math.max(0, this.happyT - dt);
     if (I.down && UI.on && I.y > 26) this.px = lerp(this.px, clamp(I.x, 20, W - 20), Math.min(1, dt * 14));
@@ -177,16 +183,22 @@ Scenes.mouse = {
   enter() {
     MG.start(this);
     this.time = 40; this.spawnT = 0.4;
-    const cols = PORTRAIT ? 2 : 3, rows = PORTRAIT ? 3 : 2;
     this.holes = [];
+    for (let i = 0; i < 6; i++) this.holes.push({ x: 0, y: 0, kind: null, t: 0, life: 0, hit: false });
+    this.layoutHoles();
+    this.petJump = 0; this.petExpr = 'open'; this.exprT = 0;
+  },
+  layoutHoles() {
+    this.lv = layoutVersion;
+    const cols = PORTRAIT ? 2 : 3, rows = PORTRAIT ? 3 : 2;
     const top = 46, bottom = H - 70;
     const cw = (W - 40) / cols, rh = (bottom - top) / rows;
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) this.holes.push({ x: 20 + cw * (c + 0.5), y: top + rh * (r + 0.75), kind: null, t: 0, life: 0, hit: false });
-    this.petJump = 0; this.petExpr = 'open'; this.exprT = 0;
+    this.holes.forEach((h, i) => { const r = Math.floor(i / cols), c = i % cols; h.x = 20 + cw * (c + 0.5); h.y = top + rh * (r + 0.75); });
   },
   leave() { Game.save(); },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (this.lv !== layoutVersion) this.layoutHoles();
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt; this.time -= dt;
     this.exprT -= dt; if (this.exprT <= 0) this.petExpr = 'open';
     this.petJump = Math.max(0, this.petJump - dt * 3);
@@ -280,7 +292,7 @@ Scenes.run = {
     }
   },
   update(dt) {
-    if (MG.countdown(this, dt) || this.over) return;
+    if (overlays.length || MG.countdown(this, dt) || this.over) return;
     this.t += dt;
     if ((I.pressed && UI.on && !(I.x > W - 32 && I.y < 26)) || I.keyPressed === ' ' || I.keyPressed === 'ArrowUp') this.jump();
     this.speed = Math.min(270, 110 + this.t * 4);

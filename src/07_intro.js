@@ -221,15 +221,16 @@ Scenes.title = {
   },
   draw(dt) {
     drawDreamBG(dt);
-    const sc = clamp(Math.floor(W / 52), 4, 8);
+    const sc = clamp(Math.floor(W / 48), 4, 8);
     const k = Ease.outBack(clamp(this.t / 0.8, 0, 1));
-    const ly = lerp(-60, H * 0.3, k);
+    const ly = lerp(-60, PORTRAIT ? H * 0.26 : H * 0.3, k);
     drawLogo(W / 2, ly, sc, { peekBreed: this.peek });
     text('a cozy 8-bit pet game', W / 2, ly + sc * 7 + 12, { color: '#ffffff', align: 'center', outline: '#5a3a8a' });
     if (this.t > 0.9 && Math.floor(T * 1.8) % 2 === 0) {
-      iconC('paw', W / 2 - 50, H * 0.66 + 3, 1);
-      iconC('paw', W / 2 + 50, H * 0.66 + 3, 1);
-      text('TAP TO PLAY', W / 2, H * 0.66, { color: '#ffffff', align: 'center', outline: COL.ink, shadow: COL.ink });
+      const ty = PORTRAIT ? H * 0.58 : H * 0.66;
+      iconC('paw', W / 2 - 50, ty + 3, 1);
+      iconC('paw', W / 2 + 50, ty + 3, 1);
+      text('TAP TO PLAY', W / 2, ty, { color: '#ffffff', align: 'center', outline: COL.ink, shadow: COL.ink });
     }
     text('© MTEC Labs', W - 4, 4, { color: '#ffffff', align: 'right', shadow: '#5a6ac8' });
   },

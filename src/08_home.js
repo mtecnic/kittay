@@ -449,7 +449,7 @@ Scenes.home = {
     if (rt.blinkT <= 0) { rt.blink = 0.12; rt.blinkT = rnd(2.5, 5); }
     rt.blink = Math.max(0, rt.blink - dt);
     // jump physics
-    if (rt.jump > 0 || rt.jumpV !== 0) {
+    if (rt.state !== 'perch' && (rt.jump > 0 || rt.jumpV !== 0)) {
       rt.jumpV += 420 * dt; rt.jump -= rt.jumpV * dt;
       if (rt.jump <= 0) { rt.jump = 0; if (rt.jumpV > 60) rt.squash = 0.15; rt.jumpV = 0; }
     }
@@ -542,6 +542,15 @@ Scenes.home = {
         break;
       }
       case 'refuse': if (rt.t > 1.2) { rt.state = 'idle'; rt.t = 0; rt.dur = 1; } break;
+      case 'perch': {
+        // sitting up on the cat tree
+        const ph = L.groundY - (L.floorY + 14 - 36) - 1, up = 0.45, hold = 6;
+        if (rt.t < up) rt.jump = ph * Ease.outQuad(rt.t / up);
+        else if (rt.t < up + hold) { rt.jump = ph; rt.expr = 'happy'; }
+        else if (rt.t < up + hold + 0.4) rt.jump = ph * (1 - Ease.inQuad((rt.t - up - hold) / 0.4));
+        else { rt.jump = 0; rt.state = 'idle'; rt.t = 0; rt.dur = 1.5; Snd.play('land'); }
+        break;
+      }
       case 'trick': {
         if (rt.t > 2) {
           rt.state = 'idle'; rt.t = 0; rt.dur = 2;
@@ -568,7 +577,10 @@ Scenes.home = {
     const r = Math.random();
     rt.t = 0;
     const tired = pet.s[2] < 30;
-    if (r < 0.42) {
+    if (r < 0.1 && Game.hasFurn('tree') && !Game.isDog(pet) && !tired) {
+      rt.state = 'walk'; rt.tx = clamp(W - L.sideS - 42, L.minX, L.maxX);
+      rt.onArrive = () => { rt.state = 'perch'; rt.t = 0; rt.face = -1; Snd.play('jump'); };
+    } else if (r < 0.42) {
       rt.state = 'walk'; rt.tx = rnd(L.minX, L.maxX);
       if (Math.abs(rt.tx - rt.x) < 20) rt.tx = clamp(rt.x + (rt.x < W / 2 ? 50 : -50), L.minX, L.maxX);
     } else if (r < 0.55) { rt.state = 'groom'; }
@@ -720,6 +732,7 @@ Scenes.home = {
     if (!this.welcome) {
       const box = this.petBox();
       if (rt.sayT > 0 && rt.say) drawBubble(rt.x + 6, box.y - 2, null, rt.say);
+      else if (this.petMode && this.loveMeter < 40 && rt.state !== 'sleep') drawBubble(rt.x + 6, box.y - 2 + Math.sin(T * 5) * 2, null, 'Rub me!');
       else if (rt.bubble != null && rt.state !== 'sleep' && Math.floor(T * 2) % 4 !== 0) drawBubble(rt.x + 6, box.y - 2, NEEDS[rt.bubble].icon);
     }
     this.drawHUD(L, pet);
@@ -745,6 +758,7 @@ Scenes.home = {
       case 'refuse': st.expr = 'grumpy'; st.flip = Math.floor(rt.t * 8) % 2 === 1; break;
       case 'play': st.expr = 'happy'; st.pawL = rt.jump > 4 ? 0.8 : 0; st.pawR = rt.jump > 4 ? 0.8 : 0; break;
       case 'idle': if (sad) st.expr = 'sad'; break;
+      case 'perch': st.expr = 'happy'; st.tail = Math.round(Math.sin(T * 2) * 2); break;
     }
     if (rt.blink > 0 && (st.expr === 'open' || st.expr === 'sad')) st.expr = 'blink';
     if (rt.squash > 0) { st.sy = 0.85; st.sx = 1.12; }

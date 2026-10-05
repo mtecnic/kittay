@@ -7,7 +7,7 @@ import { createRequire } from 'module';
 const require = createRequire('/opt/node22/lib/node_modules/');
 const { chromium } = require('playwright');
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const [out, query = 'test=sheet', w = '1024', h = '768', wait = '600', script = ''] = process.argv.slice(2);
+const [out, query = 'test=sheet', w = '1024', h = '768', wait = '600', script = '', dpr = '2'] = process.argv.slice(2);
 const types = { '.html': 'text/html', '.png': 'image/png', '.js': 'text/javascript' };
 const srv = http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -19,7 +19,7 @@ const srv = http.createServer((req, res) => {
 }).listen(0);
 const port = srv.address().port;
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: +w, height: +h }, deviceScaleFactor: 2, hasTouch: true });
+const page = await browser.newPage({ viewport: { width: +w, height: +h }, deviceScaleFactor: +dpr, hasTouch: true });
 const logs = [];
 page.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
 page.on('pageerror', (e) => logs.push('PAGEERROR: ' + e.message));

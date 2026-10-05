@@ -151,6 +151,8 @@ function resize() {
   // (integer scale when possible for crisp pixels; fractional on small low-DPI screens)
   let s = Math.min(dw, dh) / 240;
   s = s >= 2 ? Math.floor(s) : Math.max(1, s);
+  const forced = parseFloat(new URLSearchParams(location.search).get('px') || '0');
+  if (forced > 0) s = forced * dpr;
   let w = Math.floor(dw / s), h = Math.floor(dh / s);
   // keep things sane on very wide / very tall screens
   if (w > h * 1.9) w = Math.floor(h * 1.9);
@@ -2900,15 +2902,16 @@ Scenes.title = {
   },
   draw(dt) {
     drawDreamBG(dt);
-    const sc = clamp(Math.floor(W / 52), 4, 8);
+    const sc = clamp(Math.floor(W / 48), 4, 8);
     const k = Ease.outBack(clamp(this.t / 0.8, 0, 1));
-    const ly = lerp(-60, H * 0.3, k);
+    const ly = lerp(-60, PORTRAIT ? H * 0.26 : H * 0.3, k);
     drawLogo(W / 2, ly, sc, { peekBreed: this.peek });
     text('a cozy 8-bit pet game', W / 2, ly + sc * 7 + 12, { color: '#ffffff', align: 'center', outline: '#5a3a8a' });
     if (this.t > 0.9 && Math.floor(T * 1.8) % 2 === 0) {
-      iconC('paw', W / 2 - 50, H * 0.66 + 3, 1);
-      iconC('paw', W / 2 + 50, H * 0.66 + 3, 1);
-      text('TAP TO PLAY', W / 2, H * 0.66, { color: '#ffffff', align: 'center', outline: COL.ink, shadow: COL.ink });
+      const ty = PORTRAIT ? H * 0.58 : H * 0.66;
+      iconC('paw', W / 2 - 50, ty + 3, 1);
+      iconC('paw', W / 2 + 50, ty + 3, 1);
+      text('TAP TO PLAY', W / 2, ty, { color: '#ffffff', align: 'center', outline: COL.ink, shadow: COL.ink });
     }
     text('© MTEC Labs', W - 4, 4, { color: '#ffffff', align: 'right', shadow: '#5a6ac8' });
   },
@@ -3673,7 +3676,7 @@ Scenes.home = {
     if (rt.blinkT <= 0) { rt.blink = 0.12; rt.blinkT = rnd(2.5, 5); }
     rt.blink = Math.max(0, rt.blink - dt);
     // jump physics
-    if (rt.jump > 0 || rt.jumpV !== 0) {
+    if (rt.state !== 'perch' && (rt.jump > 0 || rt.jumpV !== 0)) {
       rt.jumpV += 420 * dt; rt.jump -= rt.jumpV * dt;
       if (rt.jump <= 0) { rt.jump = 0; if (rt.jumpV > 60) rt.squash = 0.15; rt.jumpV = 0; }
     }
@@ -3766,6 +3769,15 @@ Scenes.home = {
         break;
       }
       case 'refuse': if (rt.t > 1.2) { rt.state = 'idle'; rt.t = 0; rt.dur = 1; } break;
+      case 'perch': {
+        // sitting up on the cat tree
+        const ph = L.groundY - (L.floorY + 14 - 36) - 1, up = 0.45, hold = 6;
+        if (rt.t < up) rt.jump = ph * Ease.outQuad(rt.t / up);
+        else if (rt.t < up + hold) { rt.jump = ph; rt.expr = 'happy'; }
+        else if (rt.t < up + hold + 0.4) rt.jump = ph * (1 - Ease.inQuad((rt.t - up - hold) / 0.4));
+        else { rt.jump = 0; rt.state = 'idle'; rt.t = 0; rt.dur = 1.5; Snd.play('land'); }
+        break;
+      }
       case 'trick': {
         if (rt.t > 2) {
           rt.state = 'idle'; rt.t = 0; rt.dur = 2;
@@ -3792,7 +3804,10 @@ Scenes.home = {
     const r = Math.random();
     rt.t = 0;
     const tired = pet.s[2] < 30;
-    if (r < 0.42) {
+    if (r < 0.1 && Game.hasFurn('tree') && !Game.isDog(pet) && !tired) {
+      rt.state = 'walk'; rt.tx = clamp(W - L.sideS - 42, L.minX, L.maxX);
+      rt.onArrive = () => { rt.state = 'perch'; rt.t = 0; rt.face = -1; Snd.play('jump'); };
+    } else if (r < 0.42) {
       rt.state = 'walk'; rt.tx = rnd(L.minX, L.maxX);
       if (Math.abs(rt.tx - rt.x) < 20) rt.tx = clamp(rt.x + (rt.x < W / 2 ? 50 : -50), L.minX, L.maxX);
     } else if (r < 0.55) { rt.state = 'groom'; }
@@ -3944,6 +3959,7 @@ Scenes.home = {
     if (!this.welcome) {
       const box = this.petBox();
       if (rt.sayT > 0 && rt.say) drawBubble(rt.x + 6, box.y - 2, null, rt.say);
+      else if (this.petMode && this.loveMeter < 40 && rt.state !== 'sleep') drawBubble(rt.x + 6, box.y - 2 + Math.sin(T * 5) * 2, null, 'Rub me!');
       else if (rt.bubble != null && rt.state !== 'sleep' && Math.floor(T * 2) % 4 !== 0) drawBubble(rt.x + 6, box.y - 2, NEEDS[rt.bubble].icon);
     }
     this.drawHUD(L, pet);
@@ -3969,6 +3985,7 @@ Scenes.home = {
       case 'refuse': st.expr = 'grumpy'; st.flip = Math.floor(rt.t * 8) % 2 === 1; break;
       case 'play': st.expr = 'happy'; st.pawL = rt.jump > 4 ? 0.8 : 0; st.pawR = rt.jump > 4 ? 0.8 : 0; break;
       case 'idle': if (sad) st.expr = 'sad'; break;
+      case 'perch': st.expr = 'happy'; st.tail = Math.round(Math.sin(T * 2) * 2); break;
     }
     if (rt.blink > 0 && (st.expr === 'open' || st.expr === 'sad')) st.expr = 'blink';
     if (rt.squash > 0) { st.sy = 0.85; st.sx = 1.12; }
@@ -5833,6 +5850,59 @@ Scenes.devhome = {
     go(to, QS.get('welcome') ? { welcome: true } : null, true);
   },
   draw() {},
+};
+
+/* promo art: index.html?test=thumb (1200x630) and ?test=icon (square) */
+Scenes.thumb = {
+  draw(dt) {
+    drawDreamBG(0.016, { parade: false });
+    // soft rays behind the logo
+    g.globalAlpha = 0.18;
+    for (let i = 0; i < 18; i++) {
+      const a = (i * TAU) / 18 + 0.1;
+      line(W / 2, H * 0.32, W / 2 + Math.cos(a) * W, H * 0.32 + Math.sin(a) * W, '#ffffff', 10);
+    }
+    g.globalAlpha = 1;
+    const sc = Math.floor(W / 60);
+    const T0 = T; T = 0.35;
+    drawLogo(W / 2, H * 0.1, sc, { peek: false });
+    T = T0;
+    text('Adopt  •  Feed  •  Brush  •  Play  •  Grow!', W / 2, H * 0.1 + sc * 8 + 6, { align: 'center', color: '#ffffff', outline: '#7a3a9a', scale: 2 });
+    const order = [0, 8, 1, 2, 9, 3, 4, 10, 5, 6, 11, 7];
+    const eqs = [{ h: 'bow' }, { n: 'bandana' }, { h: 'crown' }, { h: 'flower' }, {}, { n: 'bowtie' }, { h: 'witch' }, { h: 'party' }, { h: 'bunny' }, { f: 'shades' }, { n: 'collar' }, { h: 'tophat' }];
+    const n = order.length, gap = (W - 40) / n;
+    order.forEach((b, i) => {
+      const lv = i % 3 === 1 ? 10 : 1;
+      const x = 20 + gap * (i + 0.5);
+      const y = H - 10 - (i % 2) * 6;
+      shadowEllipse(x, y, 14, 3, 0.25);
+      drawPet({ b, lv, eq: eqs[i] }, x, y, 2, { expr: ['happy', 'open', 'love', 'star'][i % 4], tail: (i % 5) - 2 });
+    });
+    for (let i = 0; i < 26; i++) {
+      const x = hash2(i, 1, 77) * W, y = hash2(i, 2, 77) * H * 0.62;
+      if (Math.abs(x - W / 2) < W * 0.32 && y > H * 0.08 && y < H * 0.45) continue;
+      if (i % 3 === 0) iconC('heart', x, y, 1); else { rect(x - 2, y, 5, 1, '#ffffff'); rect(x, y - 2, 1, 5, '#ffffff'); }
+    }
+    text('MTEC LABS', W - 6, 6, { align: 'right', color: '#ffffff', outline: '#5a6ac8' });
+  },
+};
+Scenes.icon = {
+  draw() {
+    const bg = gradientCanvasCached('icon', ['#ffb3d8', '#ff8ac0', '#c88aff', '#8a6cff']);
+    g.drawImage(bg, 0, 0);
+    g.globalAlpha = 0.25;
+    for (let i = 0; i < 12; i++) { const a = (i * TAU) / 12; line(W / 2, H * 0.55, W / 2 + Math.cos(a) * W, H * 0.55 + Math.sin(a) * W, '#ffffff', Math.max(2, Math.round(W / 40))); }
+    g.globalAlpha = 1;
+    const pet = { b: parseInt(QS.get('b') || '0', 10), lv: 1, eq: {} };
+    const sc = Math.max(2, Math.floor((H * 0.7) / 32));
+    ellipseFill(W / 2, H * 0.86, 16 * sc / 2 + 4, 3 * sc / 2 + 1, 'rgba(60,20,90,0.3)');
+    drawPet(pet, W / 2, H * 0.86, sc, { expr: 'happy', tail: 2 });
+    const s2 = Math.max(1, Math.round(W / 90));
+    for (const [fx, fy] of [[0.18, 0.2], [0.82, 0.26], [0.86, 0.66], [0.14, 0.62]]) {
+      rect(W * fx - 2 * s2, H * fy, 5 * s2, s2, '#ffffff'); rect(W * fx, H * fy - 2 * s2, s2, 5 * s2, '#ffffff');
+    }
+    iconC('heart', W * 0.8, H * 0.42, s2);
+  },
 };
 
 function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }

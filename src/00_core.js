@@ -90,6 +90,8 @@ function resize() {
   // (integer scale when possible for crisp pixels; fractional on small low-DPI screens)
   let s = Math.min(dw, dh) / 240;
   s = s >= 2 ? Math.floor(s) : Math.max(1, s);
+  const forced = parseFloat(new URLSearchParams(location.search).get('px') || '0');
+  if (forced > 0) s = forced * dpr;
   let w = Math.floor(dw / s), h = Math.floor(dh / s);
   // keep things sane on very wide / very tall screens
   if (w > h * 1.9) w = Math.floor(h * 1.9);

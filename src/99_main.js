@@ -118,6 +118,59 @@ Scenes.devhome = {
   draw() {},
 };
 
+/* promo art: index.html?test=thumb (1200x630) and ?test=icon (square) */
+Scenes.thumb = {
+  draw(dt) {
+    drawDreamBG(0.016, { parade: false });
+    // soft rays behind the logo
+    g.globalAlpha = 0.18;
+    for (let i = 0; i < 18; i++) {
+      const a = (i * TAU) / 18 + 0.1;
+      line(W / 2, H * 0.32, W / 2 + Math.cos(a) * W, H * 0.32 + Math.sin(a) * W, '#ffffff', 10);
+    }
+    g.globalAlpha = 1;
+    const sc = Math.floor(W / 60);
+    const T0 = T; T = 0.35;
+    drawLogo(W / 2, H * 0.1, sc, { peek: false });
+    T = T0;
+    text('Adopt  •  Feed  •  Brush  •  Play  •  Grow!', W / 2, H * 0.1 + sc * 8 + 6, { align: 'center', color: '#ffffff', outline: '#7a3a9a', scale: 2 });
+    const order = [0, 8, 1, 2, 9, 3, 4, 10, 5, 6, 11, 7];
+    const eqs = [{ h: 'bow' }, { n: 'bandana' }, { h: 'crown' }, { h: 'flower' }, {}, { n: 'bowtie' }, { h: 'witch' }, { h: 'party' }, { h: 'bunny' }, { f: 'shades' }, { n: 'collar' }, { h: 'tophat' }];
+    const n = order.length, gap = (W - 40) / n;
+    order.forEach((b, i) => {
+      const lv = i % 3 === 1 ? 10 : 1;
+      const x = 20 + gap * (i + 0.5);
+      const y = H - 10 - (i % 2) * 6;
+      shadowEllipse(x, y, 14, 3, 0.25);
+      drawPet({ b, lv, eq: eqs[i] }, x, y, 2, { expr: ['happy', 'open', 'love', 'star'][i % 4], tail: (i % 5) - 2 });
+    });
+    for (let i = 0; i < 26; i++) {
+      const x = hash2(i, 1, 77) * W, y = hash2(i, 2, 77) * H * 0.62;
+      if (Math.abs(x - W / 2) < W * 0.32 && y > H * 0.08 && y < H * 0.45) continue;
+      if (i % 3 === 0) iconC('heart', x, y, 1); else { rect(x - 2, y, 5, 1, '#ffffff'); rect(x, y - 2, 1, 5, '#ffffff'); }
+    }
+    text('MTEC LABS', W - 6, 6, { align: 'right', color: '#ffffff', outline: '#5a6ac8' });
+  },
+};
+Scenes.icon = {
+  draw() {
+    const bg = gradientCanvasCached('icon', ['#ffb3d8', '#ff8ac0', '#c88aff', '#8a6cff']);
+    g.drawImage(bg, 0, 0);
+    g.globalAlpha = 0.25;
+    for (let i = 0; i < 12; i++) { const a = (i * TAU) / 12; line(W / 2, H * 0.55, W / 2 + Math.cos(a) * W, H * 0.55 + Math.sin(a) * W, '#ffffff', Math.max(2, Math.round(W / 40))); }
+    g.globalAlpha = 1;
+    const pet = { b: parseInt(QS.get('b') || '0', 10), lv: 1, eq: {} };
+    const sc = Math.max(2, Math.floor((H * 0.7) / 32));
+    ellipseFill(W / 2, H * 0.86, 16 * sc / 2 + 4, 3 * sc / 2 + 1, 'rgba(60,20,90,0.3)');
+    drawPet(pet, W / 2, H * 0.86, sc, { expr: 'happy', tail: 2 });
+    const s2 = Math.max(1, Math.round(W / 90));
+    for (const [fx, fy] of [[0.18, 0.2], [0.82, 0.26], [0.86, 0.66], [0.14, 0.62]]) {
+      rect(W * fx - 2 * s2, H * fy, 5 * s2, s2, '#ffffff'); rect(W * fx, H * fy - 2 * s2, s2, 5 * s2, '#ffffff');
+    }
+    iconC('heart', W * 0.8, H * 0.42, s2);
+  },
+};
+
 function saveNow() { try { if (SAVE && SLOT >= 0) Game.save(); } catch (e) { /* ignore */ } }
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 window.addEventListener('pagehide', saveNow);
